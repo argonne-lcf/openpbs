@@ -102,11 +102,6 @@ filter_array(void **ptrarr, int (*filter_func)(void*, void*),
 int calc_time_left_STF(resource_resv *resresv, sch_resource_t* min_time_left);
 
 /*
- *      string_array_verify - verify two string arrays are equal
- */
-unsigned string_array_verify(char **sa1, char **sa2);
-
-/*
  *
  *	match_string_array - match two NULL terminated string arrays
  *
@@ -117,15 +112,7 @@ unsigned string_array_verify(char **sa1, char **sa2);
  *
  */
 enum match_string_array_ret match_string_array(const char * const *strarr1, const char * const *strarr2);
-
-/*
- *
- *	match_string_to_array - see if a string array contains a single string
- *
- *	returns value from match_string_array()
- *
- */
-enum match_string_array_ret match_string_to_array(const char *str, const char * const *strarr);
+enum match_string_array_ret match_string_array(const std::vector<std::string> &strarr1, const std::vector<std::string> &strarr2);
 
 /*
  * convert a string array into a printable string
@@ -135,13 +122,13 @@ char *string_array_to_str(char **strarr);
 /*
  *      calc_time_left - calculate the remaining time of a job
  */
-int calc_time_left(resource_resv *jinfo, int use_hard_duration);
+int calc_time_left(resource_resv *resresv, int use_hard_duration);
 
 /*
  *      cstrcmp - check string compare - compares two strings but doesn't bomb
  *                if either one is null
  */
-int cstrcmp(char *s1, char *s2);
+int cstrcmp(const char *s1, const char *s2);
 
 /*
  *      is_num - checks to see if the string is a number, size, float
@@ -181,17 +168,6 @@ int remove_ptr_from_array(void *arr, void *ptr);
  * @retval NULL on error
  */
 void *add_ptr_to_array(void *ptr_arr, void *ptr);
-
-/*
- *	remove_str_from_array - remove a string from a ptr list and move
- *				the rest of the pointers up to fill the hole
- *				Pointer array size will not change - an extra
- *				NULL is added to the end
- *
- *	returns non-zero if the str was successfully removed from the array
- *		zero if the array has not been modified
- */
-int remove_str_from_array(char **arr, char *str);
 
 /*
  *      is_valid_pbs_name - is str a valid pbs username (POSIX.1 + ' ')
@@ -271,7 +247,7 @@ free_schd_error_list(schd_error *err_list);
 schd_error *
 create_schd_error(enum sched_error_code error_code, enum schd_err_status status_code);
 schd_error *
-create_schd_error_complex(enum sched_error_code error_code, enum schd_err_status status_code, char *arg1, char *arg2, char *arg3, char *errbuf);
+create_schd_error_complex(enum sched_error_code error_code, enum schd_err_status status_code, char *arg1, char *arg2, char *arg3, char *specmsg);
 
 /* add schd_errors to linked list */
 void
@@ -298,4 +274,8 @@ void free_ptr_array (void *inp);
 void log_eventf(int eventtype, int objclass, int sev, const std::string& objname, const char *fmt, ...);
 void log_event(int eventtype, int objclass, int sev, const std::string& objname, const char *text);
 
+/*
+ * overloaded break_comma_list function
+ */
+std::vector<std::string> break_comma_list(const std::string &strlist);
 #endif	/* _MISC_H */

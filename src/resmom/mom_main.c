@@ -109,9 +109,7 @@
 #include	"pbs_internal.h"
 #include	"pbs_idx.h"
 #ifdef HWLOC
-#ifndef NAS /* localmod 113 */
 #include	"hwloc.h"
-#endif /* localmod 113 */
 #endif
 #include	"hook.h"
 #include	"mom_hook_func.h"
@@ -336,12 +334,16 @@ pbs_list_head	svr_allhooks;
 pbs_list_head	svr_queuejob_hooks;
 pbs_list_head	svr_modifyjob_hooks;
 pbs_list_head	svr_resvsub_hooks;
+pbs_list_head	svr_modifyresv_hooks;
 pbs_list_head	svr_movejob_hooks;
 pbs_list_head	svr_runjob_hooks;
+pbs_list_head	svr_jobobit_hooks;
 pbs_list_head	svr_management_hooks;
 pbs_list_head	svr_modifyvnode_hooks;
 pbs_list_head	svr_periodic_hooks;
 pbs_list_head	svr_provision_hooks;
+pbs_list_head	svr_resv_confirm_hooks;
+pbs_list_head	svr_resv_begin_hooks;
 pbs_list_head	svr_resv_end_hooks;
 pbs_list_head	svr_hook_job_actions;
 pbs_list_head   svr_hook_vnl_actions;
@@ -6712,6 +6714,7 @@ net_restore_handler(void *data)
 {
 	mom_net_up = 1;
 	mom_net_up_time = time(0);
+	time_delta_hellosvr(MOM_DELTA_RESET);
 
 	log_event(PBSEVENT_ERROR | PBSEVENT_FORCE, PBS_EVENTCLASS_SERVER, LOG_ALERT, __func__, "net restore handler called");
 }
@@ -7880,12 +7883,16 @@ main(int argc, char *argv[])
 	CLEAR_HEAD(svr_queuejob_hooks);
 	CLEAR_HEAD(svr_modifyjob_hooks);
 	CLEAR_HEAD(svr_resvsub_hooks);
+	CLEAR_HEAD(svr_modifyresv_hooks);
 	CLEAR_HEAD(svr_movejob_hooks);
 	CLEAR_HEAD(svr_runjob_hooks);
+	CLEAR_HEAD(svr_jobobit_hooks);
 	CLEAR_HEAD(svr_management_hooks);
 	CLEAR_HEAD(svr_modifyvnode_hooks);
 	CLEAR_HEAD(svr_periodic_hooks);
 	CLEAR_HEAD(svr_provision_hooks);
+	CLEAR_HEAD(svr_resv_confirm_hooks);
+	CLEAR_HEAD(svr_resv_begin_hooks);
 	CLEAR_HEAD(svr_resv_end_hooks);
 	CLEAR_HEAD(svr_hook_job_actions);
 	CLEAR_HEAD(svr_hook_vnl_actions);
@@ -9547,7 +9554,6 @@ check_busy(double mla)
 void
 mom_topology(void)
 {
-#ifndef NAS /* localmod 113 */
 	extern char mom_short_name[];
 	extern callfunc_t vn_callback;
 	int ret = -1;
@@ -9743,5 +9749,4 @@ bad:
 #else
 	;
 #endif
-#endif /* localmod 113 */
 }

@@ -522,7 +522,6 @@ query_jobs_chunk(th_data_query_jinfo *data)
 	int jidx;
 	struct batch_status *cur_job;
 	schd_error *err;
-	time_t server_time;
 	int pbs_sd;
 	status *policy;
 
@@ -550,24 +549,14 @@ query_jobs_chunk(th_data_query_jinfo *data)
 	}
 	resresv_arr[0] = NULL;
 
-	server_time = sinfo->server_time;
-
 	/* Move to the linked list item corresponding to the 'start' index */
 	for (cur_job = jobs, i = 0; i < sidx && cur_job != NULL; cur_job = cur_job->next, i++)
 		;
 
 	for (i = sidx, jidx = 0; i <= eidx && cur_job != NULL; cur_job = cur_job->next, i++) {
-		std::string selectspec;
 		resource_resv *resresv;
-		resource_req *req;
-		resource_req *walltime_req = NULL;
-		resource_req *soft_walltime_req = NULL;
-		char fairshare_name[100];
-		long duration;
-		time_t start;
-		time_t end;
 
-		if ((resresv = query_job(cur_job, sinfo, err)) == NULL) {
+		if ((resresv = query_job(pbs_sd, cur_job, sinfo, qinfo, err)) == NULL) {
 			data->error = 1;
 			free_schd_error(err);
 			free_resource_resv_array(resresv_arr);
@@ -598,194 +587,6 @@ query_jobs_chunk(th_data_query_jinfo *data)
 			continue;
 		}
 
-		resresv->job->queue = qinfo;
-#ifdef NAS /* localmod 040 */
-		/* we modify nodect to be the same value for all jobs in queues that are
-		 * configured to ignore nodect key sorting, for two reasons:
-		 * 1. obviously to accomplish ignoring of nodect key sorting
-		 * 2. maintain stability of qsort when comparing with a job in a queue that
-		 *    does not require nodect key sorting
-		 * note that this assumes nodect is used only for sorting
-		 */
-		if (qinfo->ignore_nodect_sort)
-			resresv->job->nodect = 999999;
-#endif /* localmod 040 */
-
-		if ((resresv->aoename = getaoename(resresv->select)) != NULL)
-			resresv->is_prov_needed = 1;
-		if ((resresv->eoename = geteoename(resresv->select)) != NULL) {
-			/* job with a power profile can't be checkpointed or suspended */
-			resresv->job->can_checkpoint = 0;
-			resresv->job->can_suspend = 0;
-		}
-
-		if (resresv->select != NULL && resresv->select->chunks != NULL) {
-			/*
-			 * Job is invalid if there are no resources in a chunk.  Usually
-			 * happens because we strip out resources not in conf.res_to_check
-			 */
-			int k;
-			for (k = 0; resresv->select->chunks[k] != NULL; k++)
-				if (resresv->select->chunks[k]->req == NULL) {
-					set_schd_error_codes(err, NEVER_RUN, INVALID_RESRESV);
-					set_schd_error_arg(err, ARG1, "invalid chunk in select");
-					break;
-				}
-		}
-		if (resresv->place_spec->scatter &&
-			resresv->select->total_chunks >1)
-			resresv->will_use_multinode = 1;
-
-		if (resresv->job->is_queued && resresv->nspec_arr != NULL)
-			resresv->job->is_checkpointed = 1;
-
-		/* If we did not wait for mom to start the job (throughput mode),
-		 * it is possible that we’re seeing a running job without a start time set.
-		 * The stime is set when the mom reports back to the server to say the job is running.
-		 */
-		if ((resresv->job->is_running) && (resresv->job->stime == UNSPECIFIED))
-			resresv->job->stime = server_time + 1;
-
-		/* For jobs that have an exec_vnode, we create a "select" based
-		 * on its exec_vnode.  We do this so if we ever need to run the job
-		 * again, we will replace the job on the exact vnodes/resources it originally used.
-		 */
-		if (resresv->job->is_suspended && resresv->job->resreleased != NULL)
-			/* For jobs that are suspended and have resource_released, the "select"
-			* we create is based off of resources_released instead of the exec_vnode.
-			*/
-			selectspec = create_select_from_nspec(resresv->job->resreleased);
-		else if (resresv->nspec_arr != NULL)
-			selectspec = create_select_from_nspec(resresv->nspec_arr);
-
-		if (resresv->nspec_arr != NULL)
-			resresv->execselect = parse_selspec(selectspec);
-
-		/* Find out if it is a shrink-to-fit job.
-		 * If yes, set the duration to max walltime.
-		 */
-		req = find_resource_req(resresv->resreq, allres["min_walltime"]);
-		if (req != NULL) {
-			resresv->is_shrink_to_fit = 1;
-			/* Set the min duration */
-			resresv->min_duration = (time_t) req->amount;
-			req = find_resource_req(resresv->resreq, allres["max_walltime"]);
-
-#ifdef NAS /* localmod 026 */
-			/* if no max_walltime is set then we want to look at what walltime
-			 * is (if it's set at all) - it may be user-specified, queue default,
-			 * queue max, or server max.
-			 */
-			if (req == NULL) {
-				req = find_resource_req(resresv->resreq, allres["walltime"]);
-
-				/* if walltime is set, use it if it's greater than min_walltime */
-				if (req != NULL && resresv->min_duration > req->amount) {
-					req = find_resource_req(resresv->resreq, allres["min_walltime"]);
-				}
-			}
-#endif /* localmod 026 */
-		}
-
-		if ((req == NULL) || (resresv->job->is_running == 1)) {
-			soft_walltime_req = find_resource_req(resresv->resreq, allres["soft_walltime"]);
-			walltime_req = find_resource_req(resresv->resreq, allres["walltime"]);
-			if (soft_walltime_req != NULL)
-				req = soft_walltime_req;
-			else
-				req = walltime_req;
-		}
-
-		if (req != NULL)
-			duration = (long)req->amount;
-		else /* set to virtual job infinity: 5 years */
-			duration = JOB_INFINITY;
-
-		if (walltime_req != NULL)
-			resresv->hard_duration = (long)walltime_req->amount;
-		else if (resresv->min_duration != UNSPECIFIED)
-			resresv->hard_duration = resresv->min_duration;
-		else
-			resresv->hard_duration = JOB_INFINITY;
-
-		if (resresv->job->stime != UNSPECIFIED &&
-			!(resresv->job->is_queued || resresv->job->is_suspended) &&
-			resresv->ninfo_arr != NULL) {
-			start = resresv->job->stime;
-
-			/* if a job is exiting, then its end time can be more closely
-			 * estimated by setting it to now + EXITING_TIME
-			 */
-			if (resresv->job->is_exiting)
-				end = server_time + EXITING_TIME;
-			/* Normal Case: Job's end is start + duration and it ends in the future */
-			else if (start + duration >= server_time)
-				end = start + duration;
-			/* Duration has been exceeded - either extend soft_walltime or expect the job to be killed */
-			else {
-				if (soft_walltime_req != NULL) {
-					duration = extend_soft_walltime(resresv, server_time);
-					if (duration > soft_walltime_req->amount) {
-						char timebuf[128];
-						convert_duration_to_str(duration, timebuf, 128);
-						update_job_attr(pbs_sd, resresv, ATTR_estimated, "soft_walltime", timebuf, NULL, UPDATE_NOW);
-					}
-				} else
-					/* Job has exceeded its walltime.  It'll soon be killed and be put into the exiting state.
-					 * Change the duration of the job to match the current situation and assume it will end in
-					 * now + EXITING_TIME
-					 */
-					duration =  server_time - start + EXITING_TIME;
-				end = start + duration;
-			}
-			resresv->start = start;
-			resresv->end = end;
-		}
-		resresv->duration = duration;
-
-		if (qinfo->is_peer_queue) {
-			resresv->is_peer_ob = 1;
-			resresv->job->peer_sd = pbs_sd;
-		}
-
-		/* if the fairshare entity was not set by query_job(), then check
-		 * if it's 'queue' and if so, set the group info to the queue name
-		 */
-		if (conf.fairshare_ent == "queue") {
-			if (resresv->server->fstree != NULL) {
-				resresv->job->ginfo =
-					find_alloc_ginfo(qinfo->name.c_str(), resresv->server->fstree->root);
-			}
-			else
-				resresv->job->ginfo = NULL;
-		}
-
-		/* if fairshare_ent is invalid or the job doesn't have one, give a default
-		 * of something most likely unique - egroup:euser
-		 */
-
-		if (resresv->job->ginfo ==NULL) {
-#ifdef NAS /* localmod 058 */
-			sprintf(fairshare_name, "%s:%s:%s", resresv->group, resresv->user,
-				(qinfo->name != NULL ? qinfo->name : ""));
-#else
-			sprintf(fairshare_name, "%s:%s", resresv->group, resresv->user);
-#endif /* localmod 058 */
-			if (resresv->server->fstree != NULL) {
-				resresv->job->ginfo = find_alloc_ginfo(fairshare_name, resresv->server->fstree->root);
-			}
-			else
-				resresv->job->ginfo = NULL;
-		}
-#ifdef NAS /* localmod 034 */
-		if (resresv->job->sh_info == NULL) {
-			sprintf(fairshare_name, "%s:%s", resresv->group, resresv->user);
-			resresv->job->sh_info = site_find_alloc_share(resresv->server,
-								      fairshare_name);
-		}
-		site_set_share_type(resresv->server, resresv);
-#endif /* localmod 034 */
-
 		/* if the job's fairshare entity has no percentage of the machine,
 		 * the job can not run if enforce_no_shares is set
 		 */
@@ -796,21 +597,6 @@ query_jobs_chunk(th_data_query_jinfo *data)
 			}
 		}
 
-		/* add the resources_used and the resource_list together.  If the resource
-		 * request is not tracked via resources_used, it's most likely a static
-		 * resource like a license which is used for the duration of the job.
-		 * Since the first resource found in the list is returned in the find
-		 * function, if it's in both lists, the one in resources_used will be
-		 * returned first
-		 */
-		req = resresv->job->resused;
-
-		if (req != NULL) {
-			while (req->next != NULL)
-				req = req->next;
-
-			req->next = dup_resource_req_list(resresv->resreq);
-		}
 #ifdef NAS /* localmod 034 */
 		site_set_job_share(resresv);
 #endif /* localmod 034 */
@@ -856,7 +642,7 @@ static inline th_data_query_jinfo *
 alloc_tdata_jquery(status *policy, int pbs_sd, struct batch_status *jobs, queue_info *qinfo,
 		int sidx, int eidx)
 {
-	th_data_query_jinfo *tdata = NULL;
+	th_data_query_jinfo *tdata;
 
 	tdata = static_cast<th_data_query_jinfo *>(malloc(sizeof(th_data_query_jinfo)));
 	if (tdata == NULL) {
@@ -905,7 +691,6 @@ query_jobs(status *policy, int pbs_sd, queue_info *qinfo, resource_resv **pjobs,
 	static struct attropl opl2[2] = { { &opl2[1], const_cast<char *>(ATTR_state), NULL, const_cast<char *>("Q"), EQ},
 		{ NULL, const_cast<char *>(ATTR_array), NULL, const_cast<char *>("True"), NE} };
 	static struct attrl *attrib = NULL;
-	int i;
 
 	/* linked list of jobs returned from pbs_selstat() */
 	struct batch_status *jobs;
@@ -922,21 +707,23 @@ query_jobs(status *policy, int pbs_sd, queue_info *qinfo, resource_resv **pjobs,
 	int num_prev_jobs;
 	int num_new_jobs;
 
-	/* used for pbs_geterrmsg() */
-	const char *errmsg;
-
 	/* for multi-threading */
-	int chunk_size;
-	int j;
 	int jidx;
 	th_data_query_jinfo *tdata = NULL;
 	th_task_info *task = NULL;
-	int num_tasks;
-	int th_err = 0;
 	resource_resv ***jinfo_arrs_tasks;
 	int tid;
 
-	const char *jobattrs[] = {
+	if (policy == NULL || qinfo == NULL || queue_name.empty())
+		return pjobs;
+
+	opl.value = const_cast<char *>(queue_name.c_str());
+
+	if (qinfo->is_peer_queue)
+		opl.next = &opl2[0];
+
+	if (attrib == NULL) {
+		const char *jobattrs[] = {
 			ATTR_p,
 			ATTR_qtime,
 			ATTR_qrank,
@@ -973,20 +760,10 @@ query_jobs(status *policy, int pbs_sd, queue_info *qinfo, resource_resv **pjobs,
 			ATTR_A,
 			ATTR_max_run_subjobs,
 			ATTR_server_inst_id,
-			NULL
-	};
+			NULL};
 
-	if (policy == NULL || qinfo == NULL || queue_name.empty())
-		return pjobs;
-
-	opl.value = const_cast<char *>(queue_name.c_str());
-
-	if (qinfo->is_peer_queue)
-		opl.next = &opl2[0];
-
-	if (attrib == NULL) {
-		for (i = 0; jobattrs[i] != NULL; i++) {
-			struct attrl *temp_attrl = NULL;
+		for (int i = 0; jobattrs[i] != NULL; i++) {
+			struct attrl *temp_attrl;
 
 			temp_attrl = new_attrl();
 			temp_attrl->name = strdup(jobattrs[i]);
@@ -997,9 +774,9 @@ query_jobs(status *policy, int pbs_sd, queue_info *qinfo, resource_resv **pjobs,
 	}
 
 	/* get jobs from PBS server */
-	if ((jobs = pbs_selstat(pbs_sd, &opl, attrib, const_cast<char *>("S"))) == NULL) {
+	if ((jobs = send_selstat(pbs_sd, &opl, attrib, const_cast<char *>("S"))) == NULL) {
 		if (pbs_errno > 0) {
-			errmsg = pbs_geterrmsg(pbs_sd);
+			const char *errmsg = pbs_geterrmsg(pbs_sd);
 			if (errmsg == NULL)
 				errmsg = "";
 			log_eventf(PBSEVENT_SCHED, PBS_EVENTCLASS_JOB, LOG_NOTICE, "job_info",
@@ -1050,17 +827,21 @@ query_jobs(status *policy, int pbs_sd, queue_info *qinfo, resource_resv **pjobs,
 			return NULL;
 		}
 
-		for (j = 0, jidx = num_prev_jobs; tdata->oarr[j] != NULL; j++) {
+		jidx = num_prev_jobs;
+		for (int j = 0; tdata->oarr[j] != NULL; j++) {
 			resresv_arr[jidx++] = tdata->oarr[j];
 		}
 		free(tdata->oarr);
 		free(tdata);
 		resresv_arr[jidx] = NULL;
 	} else {
-		chunk_size = num_new_jobs / num_threads;
+		int chunk_size = num_new_jobs / num_threads;
+		int th_err = 0;
+		int num_tasks = 0;
+
 		chunk_size = (chunk_size > MT_CHUNK_SIZE_MIN) ? chunk_size : MT_CHUNK_SIZE_MIN;
 		chunk_size = (chunk_size < MT_CHUNK_SIZE_MAX) ? chunk_size : MT_CHUNK_SIZE_MAX;
-		for (j = 0, num_tasks = 0; num_new_jobs > 0;
+		for (int j = 0; num_new_jobs > 0;
 				num_tasks++, j += chunk_size, num_new_jobs -= chunk_size) {
 			tdata = alloc_tdata_jquery(policy, pbs_sd, jobs, qinfo, j, j + chunk_size - 1);
 			if (tdata == NULL) {
@@ -1089,13 +870,13 @@ query_jobs(status *policy, int pbs_sd, queue_info *qinfo, resource_resv **pjobs,
 			th_err = 1;
 		}
 		/* Get results from worker threads */
-		for (i = 0; i < num_tasks;) {
+		for (int i = 0; i < num_tasks;) {
 			pthread_mutex_lock(&result_lock);
 			while (ds_queue_is_empty(result_queue))
 				pthread_cond_wait(&result_cond, &result_lock);
 			while (!ds_queue_is_empty(result_queue)) {
-				task = (th_task_info*) ds_dequeue(result_queue);
-				tdata = (th_data_query_jinfo*) task->thread_data;
+				task = static_cast<th_task_info *>(ds_dequeue(result_queue));
+				tdata = static_cast<th_data_query_jinfo *>(task->thread_data);
 				if (tdata->error)
 					th_err = 1;
 				jinfo_arrs_tasks[task->task_id] = tdata->oarr;
@@ -1112,9 +893,10 @@ query_jobs(status *policy, int pbs_sd, queue_info *qinfo, resource_resv **pjobs,
 			return NULL;
 		}
 		/* Assemble job info objects from various threads into the resresv_arr */
-		for (i = 0, jidx = num_prev_jobs; i < num_tasks; i++) {
+		jidx = num_prev_jobs;
+		for (int i = 0; i < num_tasks; i++) {
 			if (jinfo_arrs_tasks[i] != NULL) {
-				for (j = 0; jinfo_arrs_tasks[i][j] != NULL; j++) {
+				for (int j = 0; jinfo_arrs_tasks[i][j] != NULL; j++) {
 					resresv_arr[jidx++] = jinfo_arrs_tasks[i][j];
 				}
 				free(jinfo_arrs_tasks[i]);
@@ -1134,6 +916,7 @@ query_jobs(status *policy, int pbs_sd, queue_info *qinfo, resource_resv **pjobs,
  *		query_job - takes info from a batch_status about a job and
  *			 converts it into a resource_resv struct
  *
+ * 	  @param[in] pbs_sd - connection descriptor to the server
  *	  @param[in] job - batch_status struct of job
  *	  @param[in] qinfo - queue where job resides
  *	  @param[out] err - returns error info
@@ -1144,7 +927,7 @@ query_jobs(status *policy, int pbs_sd, queue_info *qinfo, resource_resv **pjobs,
  */
 
 resource_resv *
-query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
+query_job(int pbs_sd, struct batch_status *job, server_info *sinfo, queue_info *qinfo, schd_error *err)
 {
 	resource_resv *resresv;		/* converted job */
 	struct attrl *attrp;		/* list of attributes returned from server */
@@ -1165,12 +948,13 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 	attrp = job->attribs;
 
 	resresv->server = sinfo;
+	resresv->job->queue = qinfo;
 
-	resresv->is_job = 1;
+	resresv->is_job = true;
 
-	resresv->job->can_checkpoint = 1;	/* default can be checkpointed */
-	resresv->job->can_requeue = 1;		/* default can be requeued */
-	resresv->job->can_suspend = 1;		/* default can be suspended */
+	resresv->job->can_checkpoint = true;	/* default can be checkpointed */
+	resresv->job->can_requeue = true;		/* default can be requeued */
+	resresv->job->can_suspend = true;		/* default can be suspended */
 
 	while (attrp != NULL && !resresv->is_invalid) {
 		clear_schd_error(err);
@@ -1252,15 +1036,17 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 		}
 		else if (!strcmp(attrp->name, ATTR_substate)) {
 			if (!strcmp(attrp->value, SUSP_BY_SCHED_SUBSTATE))
-				resresv->job->is_susp_sched = 1;
+				resresv->job->is_susp_sched = true;
 			if (!strcmp(attrp->value, PROVISIONING_SUBSTATE))
-				resresv->job->is_provisioning = 1;
+				resresv->job->is_provisioning = true;
+			if (!strcmp(attrp->value, PRERUNNING_SUBSTATE))
+				resresv->job->is_prerunning = true;
 		}
 		else if (!strcmp(attrp->name, ATTR_sched_preempted)) {
 			count = strtol(attrp->value, &endp, 10);
 			if (*endp == '\0') {
 				resresv->job->time_preempted = count;
-				resresv->job->is_preempted = 1;
+				resresv->job->is_preempted = true;
 			}
 		}
 		else if (!strcmp(attrp->name, ATTR_comment))	/* job comment */
@@ -1268,11 +1054,11 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 		else if (!strcmp(attrp->name, ATTR_released)) /* resources_released */
 			resresv->job->resreleased = parse_execvnode(attrp->value, sinfo, NULL);
 		else if (!strcmp(attrp->name, ATTR_euser))	/* account name */
-			resresv->user = string_dup(attrp->value);
+			resresv->user = attrp->value;
 		else if (!strcmp(attrp->name, ATTR_egroup))	/* group name */
-			resresv->group = string_dup(attrp->value);
+			resresv->group = attrp->value;
 		else if (!strcmp(attrp->name, ATTR_project))	/* project name */
-			resresv->project = string_dup(attrp->value);
+			resresv->project = attrp->value;
 		else if (!strcmp(attrp->name, ATTR_resv_ID))	/* reserve_ID */
 			resresv->job->resv_id = string_dup(attrp->value);
 		else if (!strcmp(attrp->name, ATTR_altid))    /* vendor ID */
@@ -1293,7 +1079,7 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 			resresv->node_set_str = break_comma_list(attrp->value);
 		else if (!strcmp(attrp->name, ATTR_array)) { /* array */
 			if (!strcmp(attrp->value, ATR_TRUE))
-				resresv->job->is_array = 1;
+				resresv->job->is_array = true;
 		}
 		else if (!strcmp(attrp->name, ATTR_array_index)) { /* array_index */
 			count = strtol(attrp->value, &endp, 10);
@@ -1302,11 +1088,11 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 			else
 				resresv->job->array_index = -1;
 
-			resresv->job->is_subjob = 1;
+			resresv->job->is_subjob = true;
 		}
 		else if (!strcmp(attrp->name, ATTR_topjob_ineligible)) {
 			if (!strcmp(attrp->value, ATR_TRUE))
-				resresv->job->topjob_ineligible = 1;
+				resresv->job->topjob_ineligible = true;
 		}
 		/* array_indices_remaining */
 		else if (!strcmp(attrp->name, ATTR_array_indices_remaining))
@@ -1317,13 +1103,11 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 				resresv->job->max_run_subjobs = count;
 		}
 		else if (!strcmp(attrp->name, ATTR_execvnode)) {
-			nspec **tmp_nspec_arr;
-			tmp_nspec_arr = parse_execvnode(attrp->value, sinfo, NULL);
+			auto tmp_nspec_arr = parse_execvnode(attrp->value, sinfo, NULL);
 			resresv->nspec_arr = combine_nspec_array(tmp_nspec_arr);
 			free_nspecs(tmp_nspec_arr);
 
-			if (resresv->nspec_arr != NULL)
-				resresv->ninfo_arr = create_node_array_from_nspec(resresv->nspec_arr);
+			resresv->ninfo_arr = create_node_array_from_nspec(resresv->nspec_arr);
 		} else if (!strcmp(attrp->name, ATTR_l)) { /* resources requested*/
 			resreq = find_alloc_resource_req_by_str(resresv->resreq, attrp->resource);
 			if (resreq == NULL) {
@@ -1334,7 +1118,8 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 			if (set_resource_req(resreq, attrp->value) != 1) {
 				set_schd_error_codes(err, NEVER_RUN, ERR_SPECIAL);
 				set_schd_error_arg(err, SPECMSG, "Bad requested resource data");
-				resresv->is_invalid = 1;
+				resresv->is_invalid = true;
+				return resresv;
 			} else {
 				if (resresv->resreq == NULL)
 					resresv->resreq = resreq;
@@ -1355,7 +1140,7 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 					if (resresv->place_spec == NULL) {
 						set_schd_error_codes(err, NEVER_RUN, ERR_SPECIAL);
 						set_schd_error_arg(err, SPECMSG, "invalid placement spec");
-						resresv->is_invalid = 1;
+						resresv->is_invalid = true;
 
 					}
 				}
@@ -1391,11 +1176,11 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 		}
 		else if (!strcmp(attrp->name, ATTR_c)) { /* checkpoint allowed? */
 			if (strcmp(attrp->value, "n") == 0)
-				resresv->job->can_checkpoint = 0;
+				resresv->job->can_checkpoint = false;
 		}
 		else if (!strcmp(attrp->name, ATTR_r)) { /* reque allowed ? */
 			if (strcmp(attrp->value, ATR_FALSE) == 0)
-				resresv->job->can_requeue = 0;
+				resresv->job->can_requeue = false;
 		}
 		else if (!strcmp(attrp->name, ATTR_depend)) {
 			resresv->job->depend_job_str = string_dup(attrp->value);
@@ -1403,6 +1188,130 @@ query_job(struct batch_status *job, server_info *sinfo, schd_error *err)
 
 		attrp = attrp->next;
 	}
+
+#ifdef NAS /* localmod 040 */
+	/* we modify nodect to be the same value for all jobs in queues that are
+	 * configured to ignore nodect key sorting, for two reasons:
+	 * 1. obviously to accomplish ignoring of nodect key sorting
+	 * 2. maintain stability of qsort when comparing with a job in a queue that
+	 *    does not require nodect key sorting
+	 * note that this assumes nodect is used only for sorting
+	 */
+	if (qinfo->ignore_nodect_sort)
+		resresv->job->nodect = 999999;
+#endif /* localmod 040 */
+
+	if (qinfo->is_peer_queue) {
+		resresv->is_peer_ob = 1;
+		resresv->job->peer_sd = pbs_sd;
+	}
+
+	if ((resresv->aoename = getaoename(resresv->select)) != NULL)
+		resresv->is_prov_needed = true;
+	if ((resresv->eoename = geteoename(resresv->select)) != NULL) {
+		/* job with a power profile can't be checkpointed or suspended */
+		resresv->job->can_checkpoint = false;
+		resresv->job->can_suspend = false;
+	}
+
+	if (resresv->select != NULL && resresv->select->chunks != NULL) {
+		/*
+		 * Job is invalid if there are no resources in a chunk.  Usually
+		 * happens because we strip out resources not in conf.res_to_check
+		 */
+		int k;
+		for (k = 0; resresv->select->chunks[k] != NULL; k++)
+			if (resresv->select->chunks[k]->req == NULL) {
+				set_schd_error_codes(err, NEVER_RUN, INVALID_RESRESV);
+				set_schd_error_arg(err, ARG1, "invalid chunk in select");
+				resresv->is_invalid = true;
+				return resresv;
+			}
+	}
+
+	if (resresv->place_spec->scatter &&
+	    resresv->select->total_chunks > 1)
+		resresv->will_use_multinode = true;
+
+	if (resresv->job->is_queued && !resresv->nspec_arr.empty())
+		resresv->job->is_checkpointed = true;
+
+	/* If we did not wait for mom to start the job (throughput mode),
+	 * it is possible that we’re seeing a running job without a start time set.
+	 * The stime is set when the mom reports back to the server to say the job is running.
+	 */
+	if ((resresv->job->is_running) && (resresv->job->stime == UNSPECIFIED))
+		resresv->job->stime = sinfo->server_time + 1;
+
+	/* For jobs that have an exec_vnode, we create a "select" based
+	 * on its exec_vnode.  We do this so if we ever need to run the job
+	 * again, we will replace the job on the exact vnodes/resources it originally used.
+	 */
+	std::string selectspec;
+	if (resresv->job->is_suspended && !resresv->job->resreleased.empty())
+		/* For jobs that are suspended and have resource_released, the "select"
+		 * we create is based off of resources_released instead of the exec_vnode.
+		 */
+		selectspec = create_select_from_nspec(resresv->job->resreleased);
+	else if (!resresv->nspec_arr.empty())
+		selectspec = create_select_from_nspec(resresv->nspec_arr);
+
+	if (!selectspec.empty())
+		resresv->execselect = parse_selspec(selectspec);
+
+	set_job_times(pbs_sd, resresv, sinfo->server_time);
+
+	/* Add Resource_List resources after resource_used on the job.  This is 
+	 * mainly for fairshare.  This allows us to use custom resources only found in 
+	 * Resource_List in our fairshare formula.  If a resource appears in both
+	 * lists, we'll find the one in resources_used first and use that.
+	 */
+	auto req = resresv->job->resused;
+
+	if (req != NULL) {
+		while (req->next != NULL)
+			req = req->next;
+
+		req->next = dup_resource_req_list(resresv->resreq);
+	}
+
+
+	/* if the fairshare entity was not set by query_job(), then check
+	 * if it's 'queue' and if so, set the group info to the queue name
+	 */
+	if (conf.fairshare_ent == "queue") {
+		if (sinfo->fstree != NULL) {
+			resresv->job->ginfo =
+				find_alloc_ginfo(qinfo->name, sinfo->fstree->root);
+		} else
+			resresv->job->ginfo = NULL;
+	}
+
+	/* if fairshare_ent is invalid or the job doesn't have one, give a default
+	 * of something most likely unique - egroup:euser
+	 */
+
+	if (resresv->job->ginfo == NULL) {
+		char fairshare_name[100];
+#ifdef NAS /* localmod 058 */
+		sprintf(fairshare_name, "%s:%s:%s", resresv->group.c_str(), resresv->user.c_str(),
+			qinfo->name.c_str());
+#else
+		sprintf(fairshare_name, "%s:%s", resresv->group.c_str(), resresv->user.c_str());
+#endif /* localmod 058 */
+		if (resresv->server->fstree != NULL) {
+			resresv->job->ginfo = find_alloc_ginfo(fairshare_name, sinfo->fstree->root);
+		} else
+			resresv->job->ginfo = NULL;
+	}
+#ifdef NAS /* localmod 034 */
+	if (resresv->job->sh_info == NULL) {
+		sprintf(fairshare_name, "%s:%s", resresv->group.c_str(), resresv->user.c_str());
+		resresv->job->sh_info = site_find_alloc_share(sinfo,
+							      fairshare_name);
+	}
+	site_set_share_type(sinfo, resresv);
+#endif /* localmod 034 */
 
 	return resresv;
 }
@@ -1449,6 +1358,7 @@ new_job_info()
 
 	jinfo->is_provisioning = 0;
 	jinfo->is_preempted = 0;
+	jinfo->is_prerunning = 0;
 
 	jinfo->job_name = NULL;
 	jinfo->comment = NULL;
@@ -1475,7 +1385,6 @@ new_job_info()
 	jinfo->max_run_subjobs = UNSPECIFIED;
 	jinfo->running_subjobs = 0;
 	jinfo->attr_updates = NULL;
-	jinfo->resreleased = NULL;
 	jinfo->resreq_rel = NULL;
 	jinfo->depend_job_str = NULL;
 	jinfo->dependent_jobs = NULL;
@@ -1701,7 +1610,7 @@ update_job_attr(int pbs_sd, resource_resv *resresv, const char *attr_name,
 	if (!resresv->is_job)
 		return 0;
 
-	/* if running in simulation then don't update but simulate that we have*/
+	/* if running in simulation then don't update but simulate that we have */
 	if (pbs_sd == SIMULATE_SD)
 		return 1;
 
@@ -1940,7 +1849,6 @@ int
 translate_fail_code(schd_error *err, char *comment_msg, char *log_msg)
 {
 	int rc = 1;
-	const char *pbse;
 	char commentbuf[MAX_LOG_SIZE];
 	const char *arg1;
 	const char *arg2;
@@ -1959,6 +1867,8 @@ translate_fail_code(schd_error *err, char *comment_msg, char *log_msg)
 	}
 
 	if (err->error_code < RET_BASE) {
+		const char *pbse;
+
 		if (err->specmsg != NULL)
 			pbse = err->specmsg;
 		else
@@ -2518,11 +2428,11 @@ create_resresv_set_by_resresv(status *policy, server_info *sinfo, resource_resv 
 	}
 
 	if (resresv_set_use_user(sinfo, rset->qinfo))
-		rset->user = string_dup(resresv->user);
+		rset->user = string_dup(resresv->user.c_str());
 	if (resresv_set_use_grp(sinfo, rset->qinfo))
-		rset->group = string_dup(resresv->group);
+		rset->group = string_dup(resresv->group.c_str());
 	if (resresv_set_use_proj(sinfo, rset->qinfo))
-		rset->project = string_dup(resresv->project);
+		rset->project = string_dup(resresv->project.c_str());
 
 	rset->select_spec = new selspec(*resresv_set_which_selspec(resresv));
 	if (rset->select_spec == NULL) {
@@ -2558,7 +2468,7 @@ create_resresv_set_by_resresv(status *policy, server_info *sinfo, resource_resv 
  * @retval -1 if not found or on error
  */
 int
-find_resresv_set(status *policy, resresv_set **rsets, char *user, char *group, char *project, selspec *sel, place *pl, resource_req *req, queue_info *qinfo)
+find_resresv_set(status *policy, resresv_set **rsets, const char *user, const char *group, const char *project, selspec *sel, place *pl, resource_req *req, queue_info *qinfo)
 {
 	int i;
 
@@ -2609,9 +2519,9 @@ find_resresv_set(status *policy, resresv_set **rsets, char *user, char *group, c
 int
 find_resresv_set_by_resresv(status *policy, resresv_set **rsets, resource_resv *resresv)
 {
-	char *user = NULL;
-	char *grp = NULL;
-	char *proj = NULL;
+	const char *user = NULL;
+	const char *grp = NULL;
+	const char *proj = NULL;
 	queue_info *qinfo = NULL;
 	selspec *sspec;
 
@@ -2623,13 +2533,13 @@ find_resresv_set_by_resresv(status *policy, resresv_set **rsets, resource_resv *
 			qinfo = resresv->job->queue;
 
 	if (resresv_set_use_user(resresv->server, qinfo))
-		user = resresv->user;
+		user = resresv->user.c_str();
 
 	if (resresv_set_use_grp(resresv->server, qinfo))
-		grp = resresv->group;
+		grp = resresv->group.c_str();
 
 	if (resresv_set_use_proj(resresv->server, qinfo))
-		proj = resresv->project;
+		proj = resresv->project.c_str();
 
 	sspec = resresv_set_which_selspec(resresv);
 
@@ -2647,7 +2557,6 @@ create_resresv_sets(status *policy, server_info *sinfo)
 {
 	int i;
 	int j = 0;
-	int cur_ind;
 	int len;
 	int rset_len;
 	resource_resv **resresvs;
@@ -2670,7 +2579,7 @@ create_resresv_sets(status *policy, server_info *sinfo)
 	rsets[0] = NULL;
 
 	for (i = 0; resresvs[i] != NULL; i++) {
-		cur_ind = find_resresv_set_by_resresv(policy, rsets, resresvs[i]);
+		auto cur_ind = find_resresv_set_by_resresv(policy, rsets, resresvs[i]);
 
 		/* Didn't find the set, create it.*/
 		if (cur_ind == -1) {
@@ -2682,9 +2591,7 @@ create_resresv_sets(status *policy, server_info *sinfo)
 			cur_ind = j;
 			rsets[j++] = cur_rset;
 			rsets[j] = NULL;
-		} else
-			cur_rset = rsets[cur_ind];
-
+		}
 		resresvs[i]->ec_index = cur_ind;
 	}
 
@@ -2734,6 +2641,7 @@ dup_job_info(job_info *ojinfo, queue_info *nqinfo, server_info *nsinfo)
 	njinfo->is_susp_sched = ojinfo->is_susp_sched;
 	njinfo->is_array = ojinfo->is_array;
 	njinfo->is_subjob = ojinfo->is_subjob;
+	njinfo->is_prerunning = ojinfo->is_prerunning;
 	njinfo->can_not_preempt = ojinfo->can_not_preempt;
 	njinfo->topjob_ineligible = ojinfo->topjob_ineligible;
 	njinfo->is_checkpointed = ojinfo->is_checkpointed;
@@ -2954,7 +2862,6 @@ find_and_preempt_jobs(status *policy, int pbs_sd, resource_resv *hjob, server_in
 	int i = 0;
 	int *jobs = NULL;
 	resource_resv *job = NULL;
-	int ret = -1;
 	int done = 0;
 	int rc = 1;
 	int *preempted_list = NULL;
@@ -3084,7 +2991,7 @@ find_and_preempt_jobs(status *policy, int pbs_sd, resource_resv *hjob, server_in
 
 	if (done) {
 		clear_schd_error(err);
-		ret = run_update_resresv(policy, pbs_sd, sinfo, hjob->job->queue, hjob, NULL, RURR_ADD_END_EVENT, err);
+		auto ret = run_update_job(policy, pbs_sd, sinfo, hjob->job->queue, hjob, RURR_ADD_END_EVENT, err);
 
 		/* oops... we screwed up.. the high priority job didn't run.  Forget about
 		 * running it now and resume preempted work
@@ -3103,7 +3010,7 @@ find_and_preempt_jobs(status *policy, int pbs_sd, resource_resv *hjob, server_in
 				job = find_resource_resv_by_indrank(sinfo->jobs, -1, preempted_list[i]);
 				if (job != NULL && !job->job->is_running) {
 					clear_schd_error(serr);
-					if (run_update_resresv(policy, pbs_sd, sinfo, job->job->queue, job, NULL, RURR_NO_FLAGS, serr) == 0) {
+					if (run_update_job(policy, pbs_sd, sinfo, job->job->queue, job, RURR_NO_FLAGS, serr) == 0) {
 						schdlogerr(PBSEVENT_DEBUG, PBS_EVENTCLASS_JOB, LOG_DEBUG, job->name, "Failed to rerun job:", serr);
 					}
 				}
@@ -3167,7 +3074,6 @@ find_jobs_to_preempt(status *policy, resource_resv *hjob, server_info *sinfo, in
 	int rc = 0;
 	int retval = 0;
 	char log_buf[MAX_LOG_SIZE];
-	nspec **ns_arr = NULL;
 	schd_error *err = NULL;
 
 	enum sched_error_code old_errorcode = SUCCESS;
@@ -3237,7 +3143,7 @@ find_jobs_to_preempt(status *policy, resource_resv *hjob, server_info *sinfo, in
 		return NULL;
 	}
 
-	ns_arr = is_ok_to_run(policy, sinfo, hjob->job->queue, hjob, RETURN_ALL_ERR, full_err);
+	auto ns_arr = is_ok_to_run(policy, sinfo, hjob->job->queue, hjob, RETURN_ALL_ERR, full_err);
 
 	/* This should be NULL, but just in case */
 	free_nspecs(ns_arr);
@@ -3300,7 +3206,9 @@ find_jobs_to_preempt(status *policy, resource_resv *hjob, server_info *sinfo, in
 	}
 
 	/* use locally dup'd copy of sinfo so we don't modify the original */
-	if ((nsinfo = dup_server_info(sinfo)) == NULL) {
+	try {
+	    nsinfo = new server_info(*sinfo);
+	} catch (std::exception &e) {
 		free_schd_error_list(full_err);
 		free(pjobs);
 		free_string_array(preempt_targets_list);
@@ -3343,16 +3251,13 @@ find_jobs_to_preempt(status *policy, resource_resv *hjob, server_info *sinfo, in
 	/* sort jobs in ascending preemption priority and starttime... we want to preempt them
 	 * from lowest prio to highest
 	 */
-	if (sc_attrs.preempt_sort == PS_MIN_T_SINCE_START) {
-		qsort(rjobs, rjobs_count, sizeof(job_info *),
-			cmp_preempt_stime_asc);
-	}
+	if (sc_attrs.preempt_sort == PS_MIN_T_SINCE_START)
+		qsort(rjobs, rjobs_count, sizeof(job_info *), cmp_preempt_stime_asc);
 	else {
 		/* sort jobs in ascending preemption priority... we want to preempt them
 		 * from lowest prio to highest
 		 */
-		qsort(rjobs, rjobs_count, sizeof(job_info *),
-		cmp_preempt_priority_asc);
+		qsort(rjobs, rjobs_count, sizeof(job_info *), cmp_preempt_priority_asc);
 	}
 
 	err = dup_schd_error(full_err);	/* only first element */
@@ -3430,20 +3335,17 @@ find_jobs_to_preempt(status *policy, resource_resv *hjob, server_info *sinfo, in
 		pjobs[j++] = pjob;
 		pjobs[j] = NULL;
 
-		if (err != NULL) {
-			old_errorcode = err->error_code;
-			if (err->rdef != NULL) {
-				old_rdef = err->rdef;
-			} else
-				old_rdef = NULL;
-		}
+		old_errorcode = err->error_code;
+		if (err->rdef != NULL) {
+			old_rdef = err->rdef;
+		} else
+			old_rdef = NULL;
 
 		clear_schd_error(err);
-		if ((ns_arr = is_ok_to_run(npolicy, nsinfo,
-			nhjob->job->queue, nhjob, NO_ALLPART, err)) != NULL) {
-
+		ns_arr = is_ok_to_run(npolicy, nsinfo, nhjob->job->queue, nhjob, NO_ALLPART, err);
+		if (!ns_arr.empty()) {
 			/* Normally when running a subjob, we do not care about the subjob. We just care that it successfully runs.
-			 * We allow run_update_resresv() to enqueue and run the subjob.  In this case, we need to act upon the
+			 * We allow run_update_job() to enqueue and run the subjob.  In this case, we need to act upon the
 			 * subjob after it runs.  To handle this case, we enqueue it first then we run it.
 			 */
 			if (nhjob->job->is_array) {
@@ -3539,10 +3441,12 @@ find_jobs_to_preempt(status *policy, resource_resv *hjob, server_info *sinfo, in
 			clear_schd_error(err);
 			if (preemption_similarity(nhjob, pjobs[j], full_err) == 0) {
 				remove_job = 1;
-			} else if ((ns_arr = is_ok_to_run(npolicy, nsinfo,
-				pjobs[j]->job->queue, pjobs[j], NO_ALLPART, err)) != NULL) {
-				remove_job = 1;
-				sim_run_update_resresv(npolicy, pjobs[j], ns_arr, NO_ALLPART);
+			} else {
+				ns_arr = is_ok_to_run(npolicy, nsinfo, pjobs[j]->job->queue, pjobs[j], NO_ALLPART, err);
+				if (!ns_arr.empty()) {
+					remove_job = 1;
+					sim_run_update_resresv(npolicy, pjobs[j], ns_arr, NO_ALLPART);
+				}
 			}
 
 
@@ -3566,7 +3470,7 @@ find_jobs_to_preempt(status *policy, resource_resv *hjob, server_info *sinfo, in
 			*no_of_jobs = i;
 	}
 cleanup:
-	free_server(nsinfo);
+	delete nsinfo;
 	free(pjobs);
 	free(prjobs);
 	free_schd_error_list(full_err);
@@ -3600,7 +3504,6 @@ select_index_to_preempt(status *policy, resource_resv *hjob,
 	int i, j, k;
 	int good = 1;		/* good boolean: Is job eligible to be preempted */
 	struct preempt_ordering *po;
-	resdef **rdtc_non_consumable = NULL;
 
 	if ( err == NULL || hjob == NULL || hjob->job == NULL ||
 		rjobs == NULL || rjobs[0] == NULL)
@@ -3763,8 +3666,6 @@ select_index_to_preempt(status *policy, resource_resv *hjob,
 		if (good)
 			break;
 	}
-	if (rdtc_non_consumable != NULL)
-		free (rdtc_non_consumable);
 
 	if (good && rjobs[i] != NULL)
 		return i;
@@ -3935,16 +3836,16 @@ create_subjob_from_array(resource_resv *array, int index, const std::string& sub
 
 	subjob = dup_resource_resv(array, array->server, array->job->queue, subjob_name);
 
+	if (subjob == NULL) {
+		free_schd_error(err);
+		return NULL;
+	}
+
 	/* make a copy of dependent jobs */
 	subjob->job->depend_job_str = string_dup(array->job->depend_job_str);
 	subjob->job->dependent_jobs = (resource_resv **) dup_array(array->job->dependent_jobs);
 
 	array->job->queued_subjobs = tmp;
-
-	if (subjob == NULL) {
-		free_schd_error(err);
-		return NULL;
-	}
 
 	subjob->job->is_begin = 0;
 	subjob->job->is_array = 0;
@@ -4200,9 +4101,7 @@ formula_evaluate(const char *formula, resource_resv *resresv, resource_req *resr
 	char buf[1024];
 	char *globals;
 	int globals_size = 1024;  /* initial size... will grow if needed */
-	resource_req *req;
 	sch_resource_t ans = 0;
-	const char *str;
 	char *formula_buf;
 	int formula_buf_len;
 
@@ -4238,7 +4137,7 @@ formula_evaluate(const char *formula, resource_resv *resresv, resource_req *resr
 
 
 	for (const auto& cr : consres) {
-		req = find_resource_req(resreq, cr);
+		auto req = find_resource_req(resreq, cr);
 
 		if (req != NULL)
 			sprintf(buf, "\'%s\':%.*f,", cr->name.c_str(),
@@ -4296,7 +4195,7 @@ formula_evaluate(const char *formula, resource_resv *resresv, resource_req *resr
 
 	obj = PyMapping_GetItemString(dict, "_PBS_PYTHON_EXCEPTIONSTR_");
 	if (obj != NULL) {
-		str = PyUnicode_AsUTF8(obj);
+		auto str = PyUnicode_AsUTF8(obj);
 		if (str != NULL) {
 			if (strlen(str) > 0) { /* exception happened */
 				log_eventf(PBSEVENT_DEBUG2, PBS_EVENTCLASS_JOB, LOG_DEBUG, resresv->name,
@@ -4392,6 +4291,10 @@ update_accruetype(int pbs_sd, server_info *sinfo,
 
 	if (sinfo->eligible_time_enable == 0)
 		return;
+	
+	/* If we're simulating, don't update the job on the server */
+	if (pbs_sd == SIMULATE_SD)
+		return;
 
 	/* behavior of job array's eligible_time calc differs from jobs/subjobs,
 	 *  it depends on:
@@ -4406,7 +4309,7 @@ update_accruetype(int pbs_sd, server_info *sinfo,
 		return;
 	}
 
-	if ((resresv->job->preempt_status & PREEMPT_QUEUE_SERVER_SOFTLIMIT) >0) {
+	if ((resresv->job->preempt_status & PREEMPT_QUEUE_SERVER_SOFTLIMIT) > 0) {
 		make_ineligible(pbs_sd, resresv);
 		return;
 	}
@@ -4508,13 +4411,12 @@ char*
 getaoename(selspec *select)
 {
 	int i = 0;
-	resource_req *req;
 
 	if (select == NULL)
 		return NULL;
 
 	for (i = 0; select->chunks[i] != NULL; i++) {
-		req = find_resource_req(select->chunks[i]->req, allres["aoe"]);
+		auto req = find_resource_req(select->chunks[i]->req, allres["aoe"]);
 		if (req != NULL)
 			return string_dup(req->res_str);
 	}
@@ -4720,7 +4622,7 @@ preemption_similarity(resource_resv *hjob, resource_resv *pjob, schd_error *full
 			case SERVER_USER_RES_LIMIT_REACHED:
 			case SERVER_BYUSER_JOB_LIMIT_REACHED:
 			case SERVER_BYUSER_RES_LIMIT_REACHED:
-				if (strcmp(pjob->user, hjob->user) == 0)
+				if (pjob->user == hjob->user)
 					match = 1;
 				break;
 			case QUEUE_USER_LIMIT_REACHED:
@@ -4728,7 +4630,7 @@ preemption_similarity(resource_resv *hjob, resource_resv *pjob, schd_error *full
 			case QUEUE_BYUSER_JOB_LIMIT_REACHED:
 			case QUEUE_BYUSER_RES_LIMIT_REACHED:
 				if (pjob->job->queue == hjob->job->queue &&
-					strcmp(pjob->user, hjob->user) == 0)
+					(pjob->user == hjob->user))
 					match = 1;
 
 				break;
@@ -4736,7 +4638,7 @@ preemption_similarity(resource_resv *hjob, resource_resv *pjob, schd_error *full
 			case SERVER_GROUP_RES_LIMIT_REACHED:
 			case SERVER_BYGROUP_JOB_LIMIT_REACHED:
 			case SERVER_BYGROUP_RES_LIMIT_REACHED:
-				if (strcmp(pjob->group, hjob->group) == 0)
+				if (pjob->group == hjob->group)
 					match = 1;
 				break;
 
@@ -4745,14 +4647,14 @@ preemption_similarity(resource_resv *hjob, resource_resv *pjob, schd_error *full
 			case QUEUE_BYGROUP_JOB_LIMIT_REACHED:
 			case QUEUE_BYGROUP_RES_LIMIT_REACHED:
 				if (pjob->job->queue == hjob->job->queue &&
-					strcmp(pjob->group, hjob->group) == 0)
+					(pjob->group == hjob->group))
 					match = 1;
 				break;
 			case SERVER_PROJECT_LIMIT_REACHED:
 			case SERVER_PROJECT_RES_LIMIT_REACHED:
 			case SERVER_BYPROJECT_RES_LIMIT_REACHED:
 			case SERVER_BYPROJECT_JOB_LIMIT_REACHED:
-				if (strcmp(pjob->project, hjob->project) == 0)
+				if (pjob->project == hjob->project)
 					match = 1;
 				break;
 			case QUEUE_PROJECT_LIMIT_REACHED:
@@ -4760,7 +4662,7 @@ preemption_similarity(resource_resv *hjob, resource_resv *pjob, schd_error *full
 			case QUEUE_BYPROJECT_RES_LIMIT_REACHED:
 			case QUEUE_BYPROJECT_JOB_LIMIT_REACHED:
 				if (pjob->job->queue == hjob->job->queue &&
-					strcmp(pjob->project, hjob->project) == 0)
+					(pjob->project == hjob->project))
 					match = 1;
 				break;
 			case SERVER_JOB_LIMIT_REACHED:
@@ -4838,9 +4740,9 @@ preemption_similarity(resource_resv *hjob, resource_resv *pjob, schd_error *full
 void create_res_released(status *policy, resource_resv *pjob)
 {
 	std::string selectspec ;
-	if (pjob->job->resreleased == NULL) {
+	if (pjob->job->resreleased.empty()) {
 		pjob->job->resreleased = create_res_released_array(policy, pjob);
-		if (pjob->job->resreleased == NULL) {
+		if (pjob->job->resreleased.empty()) {
 			return;
 		}
 		pjob->job->resreq_rel = create_resreq_rel_list(policy, pjob);
@@ -4859,27 +4761,25 @@ void create_res_released(status *policy, resource_resv *pjob)
  * @param[in] policy - policy object
  * @param[in] resresv - Job to create resources_released
  *
- * @return nspec **
+ * @return vector<nspec *>
  * @retval nspec array of released resources
  * @retval NULL
  *
  */
-nspec **create_res_released_array(status *policy, resource_resv *resresv)
+std::vector<nspec *> create_res_released_array(status *policy, resource_resv *resresv)
 {
-	nspec **nspec_arr = NULL;
-	int i = 0;
 	resource_req *req;
 
-	if ((resresv == NULL) || (resresv->nspec_arr == NULL) || (resresv->ninfo_arr == NULL))
-		return NULL;
+	if ((resresv == NULL) || (resresv->nspec_arr.empty()) || (resresv->ninfo_arr == NULL))
+		return {};
 
-	nspec_arr = dup_nspecs(resresv->nspec_arr, resresv->ninfo_arr, NULL);
-	if (nspec_arr == NULL)
-		return NULL;
+	auto nspec_arr = dup_nspecs(resresv->nspec_arr, resresv->ninfo_arr, NULL);
+	if (nspec_arr.empty())
+		return {};
 	if (!policy->rel_on_susp.empty()) {
-		for (i = 0; nspec_arr[i] != NULL; i++) {
-			for (req = nspec_arr[i]->resreq; req != NULL; req = req->next) {
-				auto ros = policy->rel_on_susp;
+		for (auto ns : nspec_arr) {
+			for (req = ns->resreq; req != NULL; req = req->next) {
+				auto& ros = policy->rel_on_susp;
 				if (req->type.is_consumable == 1 && ros.find(req->def) == ros.end())
 					req->amount = 0;
 			}
@@ -4990,7 +4890,6 @@ extend_soft_walltime(resource_resv *resresv, time_t server_time)
 static int cull_preemptible_jobs(resource_resv *job, const void *arg)
 {
 	struct resresv_filter *inp;
-	int index;
 	resource_req *req_scan;
 
 	if (arg == NULL || job == NULL)
@@ -5009,40 +4908,40 @@ static int cull_preemptible_jobs(resource_resv *job, const void *arg)
 	switch (inp->err->error_code) {
 		case SERVER_USER_RES_LIMIT_REACHED:
 		case SERVER_BYUSER_RES_LIMIT_REACHED:
-			if ((strcmp(job->user, inp->job->user) == 0) &&
+			if ((job->user == inp->job->user) &&
 			    find_resource_req(job->resreq, inp->err->rdef) != NULL)
 				return 1;
 			break;
 		case QUEUE_USER_RES_LIMIT_REACHED:
 		case QUEUE_BYUSER_RES_LIMIT_REACHED:
 			if ((job->job->queue == inp->job->job->queue) &&
-			    (strcmp(job->user, inp->job->user) == 0) &&
+			    (job->user == inp->job->user) &&
 			    find_resource_req(job->resreq, inp->err->rdef) != NULL)
 				return 1;
 			break;
 		case SERVER_GROUP_RES_LIMIT_REACHED:
 		case SERVER_BYGROUP_RES_LIMIT_REACHED:
-			if ((strcmp(job->group, inp->job->group) == 0) &&
+			if ((job->group == inp->job->group) &&
 			    find_resource_req(job->resreq, inp->err->rdef) != NULL)
 				return 1;
 			break;
 		case QUEUE_GROUP_RES_LIMIT_REACHED:
 		case QUEUE_BYGROUP_RES_LIMIT_REACHED:
 			if ((job->job->queue == inp->job->job->queue) &&
-			    (strcmp(job->group, inp->job->group) == 0) &&
+			    (job->group == inp->job->group) &&
 			    find_resource_req(job->resreq, inp->err->rdef) != NULL)
 				return 1;
 			break;
 		case SERVER_PROJECT_RES_LIMIT_REACHED:
 		case SERVER_BYPROJECT_RES_LIMIT_REACHED:
-			if ((strcmp(job->user, inp->job->user) == 0) &&
+			if ((job->user == inp->job->user) &&
 			    find_resource_req(job->resreq, inp->err->rdef) != NULL)
 				return 1;
 			break;
 		case QUEUE_PROJECT_RES_LIMIT_REACHED:
 		case QUEUE_BYPROJECT_RES_LIMIT_REACHED:
 			if ((job->job->queue == inp->job->job->queue) &&
-			    (strcmp(job->project, inp->job->project) == 0) &&
+			    (job->project == inp->job->project) &&
 			    find_resource_req(job->resreq, inp->err->rdef) != NULL)
 				return 1;
 			break;
@@ -5052,35 +4951,35 @@ static int cull_preemptible_jobs(resource_resv *job, const void *arg)
 			break;
 		case SERVER_USER_LIMIT_REACHED:
 		case SERVER_BYUSER_JOB_LIMIT_REACHED:
-			if (strcmp(job->user, inp->job->user) == 0)
+			if (job->user == inp->job->user)
 				return 1;
 			break;
 		case QUEUE_USER_LIMIT_REACHED:
 		case QUEUE_BYUSER_JOB_LIMIT_REACHED:
 			if ((job->job->queue == inp->job->job->queue) &&
-			    (strcmp(job->user, inp->job->user) == 0))
+			    (job->user == inp->job->user))
 				return 1;
 			break;
 		case SERVER_GROUP_LIMIT_REACHED:
 		case SERVER_BYGROUP_JOB_LIMIT_REACHED:
-			if (strcmp(job->group, inp->job->group) == 0)
+			if (job->group == inp->job->group)
 				return 1;
 			break;
 		case QUEUE_GROUP_LIMIT_REACHED:
 		case QUEUE_BYGROUP_JOB_LIMIT_REACHED:
 			if((job->job->queue == inp->job->job->queue) &&
-			   (strcmp(job->group, inp->job->group) == 0))
+			   (job->group == inp->job->group))
 				return 1;
 			break;
 		case SERVER_PROJECT_LIMIT_REACHED:
 		case SERVER_BYPROJECT_JOB_LIMIT_REACHED:
-			if (strcmp(job->project, inp->job->project) == 0)
+			if (job->project == inp->job->project)
 				return 1;
 			break;
 		case QUEUE_PROJECT_LIMIT_REACHED:
 		case QUEUE_BYPROJECT_JOB_LIMIT_REACHED:
 			if ((job->job->queue == inp->job->job->queue) &&
-			   (strcmp(job->project, inp->job->project) == 0))
+			   (job->project == inp->job->project))
 				return 1;
 			break;
 		case SERVER_JOB_LIMIT_REACHED:
@@ -5117,7 +5016,7 @@ static int cull_preemptible_jobs(resource_resv *job, const void *arg)
 					 */
 					return 1;
 				}
-				for (index = 0; job->select->chunks[index] != NULL; index++)
+				for (int index = 0; job->select->chunks[index] != NULL; index++)
 				{
 					for (req_scan = job->select->chunks[index]->req; req_scan != NULL; req_scan = req_scan->next)
 					{
@@ -5249,8 +5148,6 @@ static char **parse_runone_job_list(char *depend_val) {
 	char *r;
 	char **ret = NULL;
 	char *depend_str = NULL;
-	int  job_delim = 0;
-	int  svr_delim = 0;
 
 	if (depend_val == NULL)
 		return NULL;
@@ -5275,9 +5172,9 @@ static char **parse_runone_job_list(char *depend_val) {
 		return NULL;
 	}
 	for (i = 0;  i < len; i++) {
-		job_delim = strcspn(r, ":");
+		auto job_delim = strcspn(r, ":");
 		r[job_delim] = '\0';
-		svr_delim = strcspn(r, "@");
+		auto svr_delim = strcspn(r, "@");
 		r[svr_delim] = '\0';
 		ret[i] = string_dup(r);
 		if (ret[i] == NULL) {
@@ -5313,7 +5210,7 @@ void associate_dependent_jobs(server_info *sinfo) {
 				sinfo->jobs[i]->job->dependent_jobs = static_cast<resource_resv **>(calloc((len + 1), sizeof(resource_resv *)));
 				sinfo->jobs[i]->job->dependent_jobs[len] = NULL;
 				for (j = 0; job_arr[j] != NULL; j++) {
-					resource_resv *jptr = NULL;
+					resource_resv *jptr;
 					jptr = find_resource_resv(sinfo->jobs, job_arr[j]);
 					if (jptr != NULL)
 						sinfo->jobs[i]->job->dependent_jobs[j] = jptr;
@@ -5353,4 +5250,102 @@ int associate_array_parent(resource_resv *pjob, server_info *sinfo) {
 	parent->job->running_subjobs++;
 
 	return 0;
+}
+
+/**
+ *	@brief set job's start, end, duration, and STF attributes if needed
+ *
+ * 	@param[in] pbs_sd - used to set estimated.soft_walltime
+ * 	@param[in] resresv - the job
+ * 	@param[in] server_time - current time in cycle
+ * 
+ * 	@return void
+ */
+void set_job_times(int pbs_sd, resource_resv *resresv, time_t server_time)
+{
+	long duration;
+	resource_req *soft_walltime_req = NULL;
+	resource_req *walltime_req = NULL;
+	/* Find out if it is a shrink-to-fit job.
+	 * If yes, set the duration to max walltime.
+	 */
+	auto req = find_resource_req(resresv->resreq, allres["min_walltime"]);
+	if (req != NULL) {
+		resresv->is_shrink_to_fit = true;
+		/* Set the min duration */
+		resresv->min_duration = (time_t) req->amount;
+		req = find_resource_req(resresv->resreq, allres["max_walltime"]);
+
+#ifdef NAS /* localmod 026 */
+		/* if no max_walltime is set then we want to look at what walltime
+		 * is (if it's set at all) - it may be user-specified, queue default,
+		 * queue max, or server max.
+		 */
+		if (req == NULL) {
+			req = find_resource_req(resresv->resreq, allres["walltime"]);
+
+			/* if walltime is set, use it if it's greater than min_walltime */
+			if (req != NULL && resresv->min_duration > req->amount) {
+				req = find_resource_req(resresv->resreq, allres["min_walltime"]);
+			}
+		}
+#endif /* localmod 026 */
+	}
+
+	if ((req == NULL) || (resresv->job->is_running == true)) {
+		soft_walltime_req = find_resource_req(resresv->resreq, allres["soft_walltime"]);
+		walltime_req = find_resource_req(resresv->resreq, allres["walltime"]);
+		if (soft_walltime_req != NULL)
+			req = soft_walltime_req;
+		else
+			req = walltime_req;
+	}
+
+	if (req != NULL)
+		duration = (long) req->amount;
+	else /* set to virtual job infinity: 5 years */
+		duration = JOB_INFINITY;
+
+	if (walltime_req != NULL)
+		resresv->hard_duration = (long) walltime_req->amount;
+	else if (resresv->min_duration != UNSPECIFIED)
+		resresv->hard_duration = resresv->min_duration;
+	else
+		resresv->hard_duration = JOB_INFINITY;
+
+	if (resresv->job->stime != UNSPECIFIED &&
+	    !(resresv->job->is_queued || resresv->job->is_suspended) &&
+	    resresv->ninfo_arr != NULL) {
+		auto start = resresv->job->stime;
+		time_t end;
+
+		/* if a job is exiting, then its end time can be more closely
+			 * estimated by setting it to now + EXITING_TIME
+			 */
+		if (resresv->job->is_exiting)
+			end = server_time + EXITING_TIME;
+		/* Normal Case: Job's end is start + duration and it ends in the future */
+		else if (start + duration >= server_time)
+			end = start + duration;
+		/* Duration has been exceeded - either extend soft_walltime or expect the job to be killed */
+		else {
+			if (soft_walltime_req != NULL) {
+				duration = extend_soft_walltime(resresv, server_time);
+				if (duration > soft_walltime_req->amount) {
+					char timebuf[128];
+					convert_duration_to_str(duration, timebuf, 128);
+					update_job_attr(pbs_sd, resresv, ATTR_estimated, "soft_walltime", timebuf, NULL, UPDATE_NOW);
+				}
+			} else
+				/* Job has exceeded its walltime.  It'll soon be killed and be put into the exiting state.
+				 * Change the duration of the job to match the current situation and assume it will end in
+				 * now + EXITING_TIME
+				 */
+				duration = server_time - start + EXITING_TIME;
+			end = start + duration;
+		}
+		resresv->start = start;
+		resresv->end = end;
+	}
+	resresv->duration = duration;
 }

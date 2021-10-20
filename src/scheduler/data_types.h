@@ -69,28 +69,28 @@
 #include "site_queue.h"
 #endif
 
-struct server_info;
+class server_info;
 struct job_info;
 struct schd_resource;
 struct resource_req;
 struct resource_count;
 struct holiday;
 struct prev_job_info;
-struct group_info;
+class group_info;
 struct usage_info;
-struct counts;
-struct nspec;
+class counts;
+class nspec;
 struct node_partition;
 struct range;
 struct place;
 struct schd_error;
-struct np_cache;
+class np_cache;
 struct chunk;
 class selspec;
 class resdef;
 struct event_list;
 struct status;
-struct fairshare_head;
+class fairshare_head;
 struct node_scratch;
 struct te_list;
 struct node_bucket;
@@ -103,27 +103,22 @@ struct sort_info;
 class resource_resv;
 class node_info;
 class queue_info;
+class sched_exception;
 
 
 typedef struct state_count state_count;
-typedef struct server_info server_info;
 typedef struct job_info job_info;
 typedef struct schd_resource schd_resource;
 typedef struct resource_req resource_req;
 typedef struct resource_count resource_count;
 typedef struct usage_info usage_info;
-typedef struct group_info group_info;
 typedef struct resv_info resv_info;
-typedef struct counts counts;
-typedef struct nspec nspec;
 typedef struct node_partition node_partition;
 typedef struct place place;
 typedef struct schd_error schd_error;
-typedef struct np_cache np_cache;
 typedef struct chunk chunk;
 typedef struct timed_event timed_event;
 typedef struct event_list event_list;
-typedef struct fairshare_head fairshare_head;
 typedef struct node_scratch node_scratch;
 typedef struct resresv_set resresv_set;
 typedef struct te_list te_list;
@@ -141,7 +136,7 @@ typedef struct th_data_dup_resresv th_data_dup_resresv;
 typedef struct th_data_query_jinfo th_data_query_jinfo;
 typedef struct th_data_free_resresv th_data_free_resresv;
 
-
+using counts_umap = std::unordered_map<std::string, counts *>;
 #ifdef NAS
 /* localmod 034 */
 /*
@@ -304,8 +299,9 @@ class selspec
 	std::unordered_set<resdef *> defs;			/* the resources requested by this select spec*/
 	chunk **chunks;
 	selspec();
-	selspec(selspec&);
-	~selspec();
+	selspec(const selspec&);
+	selspec& operator=(const selspec&);
+	virtual ~selspec();
 };
 
 /* for description of these bits, check the PBS admin guide or scheduler IDS */
@@ -382,8 +378,9 @@ struct schedattrs
 	long server_dyn_res_alarm;
 };
 
-struct server_info
+class server_info
 {
+	public:
 	bool has_soft_limit:1;	/* server has a soft user/grp limit set */
 	bool has_hard_limit:1;	/* server has a hard user/grp limit set */
 	bool has_mult_express:1;	/* server has multiple express queues */
@@ -404,16 +401,15 @@ struct server_info
 	bool has_nonCPU_licenses:1;	/* server has non-CPU (e.g. socket-based) licenses */
 	bool use_hard_duration:1;	/* use hard duration when creating the calendar */
 	bool pset_metadata_stale:1;	/* The placement set meta data is stale and needs to be regenerated before the next use */
-	char *name;			/* name of server */
+	std::string name;		/* name of server */
 	struct schd_resource *res;	/* list of resources */
 	void *liminfo;			/* limit storage information */
-	int num_queues;			/* number of queues that reside on the server */
 	int num_nodes;			/* number of nodes associated with the server */
 	int num_resvs;			/* number of reservations on the server */
 	int num_preempted;		/* number of jobs currently preempted */
-	char **node_group_key;		/* the node grouping resources */
+	std::vector<std::string> node_group_key;		/* the node grouping resources */
 	state_count sc;			/* number of jobs in each state */
-	queue_info **queues;		/* array of queues */
+	std::vector<queue_info *> queues;		/* array of queues */
 	queue_info ***queue_list;	/* 3 dimensional array, used to order jobs in round_robin */
 	node_info **nodes;		/* array of nodes associated with the server */
 	node_info **unassoc_nodes;	/* array of nodes not associated with queues */
@@ -433,19 +429,19 @@ struct server_info
 	 */
 	int preempt_count[NUM_PPRIO + 1];
 
-	counts *group_counts;		/* group resource and running counts */
-	counts *project_counts;		/* project resource and running counts */
-	counts *user_counts;		/* user resource and running counts */
-	counts *alljobcounts;		/* overall resource and running counts */
+	counts_umap group_counts;		/* group resource and running counts */
+	counts_umap project_counts;		/* project resource and running counts */
+	counts_umap user_counts;		/* user resource and running counts */
+	counts_umap alljobcounts;		/* overall resource and running counts */
 
 	/*
 	 * Resource/Run counts list to store counts for all jobs which
 	 * are running/queued/suspended.
 	 */
-	counts *total_group_counts;
-	counts *total_project_counts;
-	counts *total_user_counts;
-	counts *total_alljobcounts;
+	counts_umap total_group_counts;
+	counts_umap total_project_counts;
+	counts_umap total_user_counts;
+	counts_umap total_alljobcounts;
 
 	node_partition **nodepart;	/* array pointers to node partitions */
 	int num_parts;			/* number of node partitions(node_group_key) */
@@ -460,7 +456,7 @@ struct server_info
 	 * be duplicated.  It would be difficult to duplicate correctly, and it is
 	 * just a cache.  It will be regenerated when needed
 	 */
-	np_cache **npc_arr;
+	std::vector<np_cache *> npc_arr;
 
 	resource_resv *qrun_job;	/* used if running a job via qrun request */
 	/* policy structure for the server.  This is an easy storage location for
@@ -476,6 +472,18 @@ struct server_info
 	/* localmod 034 */
 	share_head *share_head;	/* root of share info */
 #endif
+	// Class methods
+	explicit server_info(const char *);
+	server_info() = delete;
+	server_info(const server_info &);
+	virtual ~server_info();
+	server_info & operator=(const server_info &);
+
+	private:
+	void init_server_info();
+	void free_server_info();
+	void free_server_psets();
+	void dup_server_psets(const std::unordered_map<std::string, node_partition*>& spsets);
 };
 
 class queue_info
@@ -518,20 +526,20 @@ class queue_info
 	resource_resv **jobs;		/* array of jobs that reside in queue */
 	resource_resv **running_jobs;	/* array of jobs in the running state */
 	node_info **nodes;		/* array of nodes associated with the queue */
-	counts *group_counts;		/* group resource and running counts */
-	counts *project_counts;		/* project resource and running counts */
-	counts *user_counts;		/* user resource and running counts */
-	counts *alljobcounts;		/* overall resource and running counts */
+	counts_umap group_counts;		/* group resource and running counts */
+	counts_umap project_counts;		/* project resource and running counts */
+	counts_umap user_counts;		/* user resource and running counts */
+	counts_umap alljobcounts;		/* overall resource and running counts */
 	/*
 	 * Resource/Run counts list to store counts for all jobs which
 	 * are running/queued/suspended.
 	 */
-	counts *total_group_counts;
-	counts *total_project_counts;
-	counts *total_user_counts;
-	counts *total_alljobcounts;
+	counts_umap total_group_counts;
+	counts_umap total_project_counts;
+	counts_umap total_user_counts;
+	counts_umap total_alljobcounts;
 
-	char **node_group_key;		/* node grouping resources */
+	std::vector<std::string> node_group_key;		/* node grouping resources */
 	struct node_partition **nodepart; /* array pointers to node partitions */
 	struct node_partition *allpart;   /* partition w/ all nodes assoc with queue*/
 	int num_parts;			/* number of node partitions(node_group_key) */
@@ -539,9 +547,9 @@ class queue_info
 	int backfill_depth;		/* total allowable topjobs in this queue*/
 	char *partition;		/* partition to which queue belongs to */
 
-	queue_info(char *);
+	explicit queue_info(const char *);
 	queue_info(queue_info&, server_info *);
-	~queue_info();
+	virtual ~queue_info();
 };
 
 struct job_info
@@ -570,6 +578,7 @@ struct job_info
 
 	bool is_provisioning:1;	/* job is provisioning */
 	bool is_preempted:1;	/* job is preempted */
+	bool is_prerunning:1;		/* Job in prerunning substate */
 	bool topjob_ineligible:1;	/* Job is ineligible to be a top job */
 
 	char *job_name;			/* job name attribute (qsub -N) */
@@ -605,7 +614,7 @@ struct job_info
 
 	struct attrl *attr_updates;	/* used to federate all attr updates to server*/
 	float formula_value;		/* evaluated job sort formula value */
-	nspec **resreleased;		/* list of resources released by the job on each node */
+	std::vector<nspec *> resreleased;		/* list of resources released by the job on each node */
 	resource_req *resreq_rel;	/* list of resources released */
 	char *depend_job_str;		/* dependent jobs in a ':' separated string */
 	resource_resv **dependent_jobs; /* dependent jobs with runone depenency */
@@ -626,7 +635,7 @@ struct job_info
 #endif
 };
 
-struct node_info
+class node_info
 {
 	public:
 	bool is_down:1;		/* node is down */
@@ -691,8 +700,8 @@ struct node_info
 
 	int priority;			/* node priority */
 
-	counts *group_counts;		/* group resource and running counts */
-	counts *user_counts;		/* user resource and running counts */
+	counts_umap group_counts;	/* group resource and running counts */
+	counts_umap user_counts;		/* user resource and running counts */
 
 	int max_running;		/* max number of jobs on the node */
 	int max_user_run;		/* max number of jobs running by a user */
@@ -724,8 +733,8 @@ struct node_info
 	node_partition **np_arr;	/* array of node partitions node is in */
 	char *svr_inst_id;
 
-	node_info(const std::string& name);
-	~node_info();
+	explicit node_info(const std::string& nname);
+	virtual ~node_info();
 };
 
 struct resv_info
@@ -754,7 +763,7 @@ struct resv_info
 	char *partition;		/* name of the partition in which the reservation was confirmed */
 	selspec *select_orig;		/* original schedselect pre-alter */
 	selspec *select_standing;	/* original schedselect for standing reservations */
-	nspec **orig_nspec_arr;		/* original non-shrunk exec_vnode with exec_vnode chunk mapped to select chunk */
+	std::vector<nspec *> orig_nspec_arr;		/* original non-shrunk exec_vnode with exec_vnode chunk mapped to select chunk */
 };
 
 /* resource reservation - used for both jobs and advanced reservations */
@@ -775,9 +784,9 @@ class resource_resv
 	bool will_use_multinode:1;	/* res resv will use multiple nodes */
 
 	const std::string name;		/* name of res resv */
-	char *user;			/* username of the owner of the res resv */
-	char *group;			/* exec group of owner of res resv */
-	char *project;			/* exec project of owner of res resv */
+	std::string user;		/* username of the owner of the res resv */
+	std::string group;		/* exec group of owner of res resv */
+	std::string project;		/* exec project of owner of res resv */
 	char *nodepart_name;		/* name of node partition to run res resv in */
 
 	long sch_priority;		/* scheduler priority of res resv */
@@ -785,7 +794,7 @@ class resource_resv
 	int ec_index;			/* Index into server's job_set array*/
 
 	time_t qtime;			/* time res resv was submitted */
-	long long qrank;			/* time on which we might need to stabilize the sort */
+	long long qrank;		/* time on which we might need to stabilize the sort */
 	time_t start;			/* start time (UNDEFINED means no start time */
 	time_t end;			/* end time (UNDEFINED means no end time */
 	time_t duration;		/* duration of resource resv request */
@@ -799,7 +808,7 @@ class resource_resv
 
 	server_info *server;		/* pointer to server which owns res resv */
 	node_info **ninfo_arr; 		/* nodes belonging to res resv */
-	nspec **nspec_arr;		/* exec vnode of object in internal sched form (one nspec per node) */
+	std::vector<nspec *> nspec_arr;		/* exec vnode of object in internal sched form (one nspec per node) */
 
 	job_info *job;			/* pointer to job specific structure */
 	resv_info *resv;		/* pointer to reservation specific structure */
@@ -816,8 +825,8 @@ class resource_resv
 	timed_event *run_event;		   /* run event in calendar */
 	timed_event *end_event;		   /* end event in calendar */
 
-	resource_resv(const std::string& rname);
-	~resource_resv();
+	explicit resource_resv(const std::string& rname);
+	virtual ~resource_resv();
 };
 
 class resource_type
@@ -881,23 +890,27 @@ class resdef
 class prev_job_info
 {
 	public:
-	const std::string name;	/* name of job */
+	std::string name;	/* name of job */
 	std::string entity_name;	/* fair share entity of job */
 	resource_req *resused;	/* resources used by the job */
-	prev_job_info(const std::string& pname, char *ename, resource_req *rused);
+	prev_job_info(const std::string& pname, const std::string& ename, resource_req *rused);
 	prev_job_info(const prev_job_info &);
-	prev_job_info(prev_job_info &&) noexcept;
+	prev_job_info(prev_job_info &&);
 	prev_job_info& operator=(const prev_job_info&);
-	~prev_job_info();
+	virtual ~prev_job_info();
 };
 
-struct counts
+class counts
 {
-	char *name;			/* name of entitiy */
+	public:
+	std::string name;		/* name of entitiy */
 	int running;			/* count of running jobs in object */
 	int soft_limit_preempt_bit;	/* Place to store preempt bit if entity is over limits */
 	resource_count *rescts;		/* resources used */
-	counts *next;
+	explicit counts(const std::string &);
+	counts(const counts &);
+	counts& operator=(const counts &);
+	virtual ~counts();
 };
 
 struct resource_count
@@ -912,23 +925,21 @@ struct resource_count
 /* global data types */
 
 /* fairshare head structure */
-struct fairshare_head
+class fairshare_head
 {
+	public:
 	group_info *root;			/* root of fairshare tree */
 	time_t last_decay;			/* last time tree was decayed */
+	fairshare_head();
+	fairshare_head(fairshare_head&);
+	fairshare_head& operator=(fairshare_head&);
+	virtual ~fairshare_head();
 };
 
-/* a path from the root to a group_info in the tree */
-struct group_path
+class group_info
 {
-	group_info *ginfo;
-	struct group_path *next;
-};
-
-
-struct group_info
-{
-	char *name;				/* name of user/group */
+	public:
+	std::string name;				/* name of user/group */
 	int resgroup;				/* resgroup the group is in */
 	int cresgroup;				/* resgroup of the children of group */
 	int shares;				/* number of shares this group has */
@@ -944,11 +955,14 @@ struct group_info
 	usage_t temp_usage;			/* usage plus any temporary usage */
 	float usage_factor;			/* usage calculation taking parent's usage into account: number between 0 and 1 */
 
-	struct group_path *gpath;		/* path from the root of the tree */
+	std::vector<group_info *> gpath;	/* path from the root of the tree */
 
 	group_info *parent;			/* parent node */
 	group_info *sibling;			/* sibling node */
 	group_info *child;			/* child node */
+	explicit group_info(const std::string& gname);
+	group_info(group_info&);
+	group_info &operator=(const group_info &);
 };
 
 /**
@@ -974,24 +988,30 @@ struct node_partition
 {
 	bool ok_break:1;	/* OK to break up chunks on this node part */
 	bool excl:1;		/* partition should be allocated exclusively */
-	char *name;			/* res_name=res_val */
+	char *name;		/* res_name=res_val */
 	/* name of resource and value which define the node partition */
 	resdef *def;
 	char *res_val;
 	int tot_nodes;		/* the total number of nodes  */
 	int free_nodes;		/* the number of nodes in state Free  */
-	schd_resource *res;		/* total amount of resources in node part */
+	schd_resource *res;	/* total amount of resources in node part */
 	node_info **ninfo_arr;	/* array of pointers to node structures  */
 	node_bucket **bkts;	/* node buckets for node part */
 	int rank;		/* unique numeric identifier for node partition */
 };
 
-struct np_cache
+class np_cache
 {
-	char **resnames;		/* resource names used to create partitions */
-	node_info **ninfo_arr;	/* ptr to array of nodes used to create pools */
-	int num_parts;		/* number of partitions in nodepart */
+	public:
+	node_info **ninfo_arr;		/* ptr to array of nodes used to create pools */
+	std::vector<std::string> resnames;		/* resource names used to create partitions */
 	node_partition **nodepart;	/* node partitions */
+	int num_parts;			/* number of partitions in nodepart */
+	np_cache();
+	np_cache(node_info **, const std::vector<std::string>&, node_partition **, int);
+	np_cache(const np_cache &) = delete;
+	np_cache& operator=(const np_cache &) = delete;
+	virtual ~np_cache();
 };
 
 /* header to usage file.  Needs to be EXACTLY the same size as a
@@ -1088,8 +1108,9 @@ struct peer_queue
 	peer_queue(const char *lqueue, const char *rqueue, const char *rserver): local_queue(lqueue), remote_queue(rqueue), remote_server(rserver) {peer_sd = -1;}
 };
 
-struct nspec
+class nspec
 {
+	public:
 	bool end_of_chunk:1; /* used for putting parens into the execvnode */
 	bool go_provision:1; /* used to mark a node to be provisioned */
 	int seq_num;			/* sequence number of chunk */
@@ -1097,6 +1118,16 @@ struct nspec
 	node_info *ninfo;
 	resource_req *resreq;
 	chunk *chk;
+
+	nspec();
+	nspec(const nspec &, node_info **, selspec *);
+	~nspec();
+	/* We need to have the copy constructor dup everything inside the nspec
+	 * We can't have the default copy constructor copy everything, because
+	 * we'd end up with a pointer to the same resreq
+	 */
+	nspec(const nspec&) = delete;
+	nspec &operator=(const nspec &) = delete;
 };
 
 struct nameval
@@ -1255,5 +1286,22 @@ struct chunk_map {
 struct resresv_filter {
 	resource_resv *job;
 	schd_error *err;		/* reason why set can not run*/
+};
+
+class sched_exception: public std::exception
+{
+	public:
+	sched_exception(const sched_exception &e);
+	sched_exception &operator=(const sched_exception &err);
+	sched_exception (const std::string &str, const enum sched_error_code e);
+	const char *what();
+	enum sched_error_code get_error_code() const;
+	const std::string& get_message() const;
+	sched_exception() = delete;
+
+	private:
+	std::string message;
+	enum sched_error_code error_code;
+
 };
 #endif	/* _DATA_TYPES_H */

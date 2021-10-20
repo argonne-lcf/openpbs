@@ -620,16 +620,6 @@ req_confirmresv(struct batch_request *preq)
 		}
 	}
 
-#ifdef NAS /* localmod 122 */
-	/* If an advance reservation has already been confirmed there's no
-	 * work to be done.
-	 */
-	if (presv->ri_qs.ri_state == RESV_CONFIRMED && !get_rattr_long(presv, RESV_ATR_resv_standing)) {
-		reply_ack(preq);
-		return;
-	}
-#endif /* localmod 122 */
-
 	if (is_being_altered)
 		free_rattr(presv, RESV_ATR_alter_revert);
 
@@ -955,6 +945,16 @@ req_confirmresv(struct batch_request *preq)
 				preq->rq_user, preq->rq_host,
 				presv->ri_qs.ri_stime, presv->ri_qs.ri_etime,
 				next_execvnode);
+		}
+		char hook_msg[HOOK_MSG_SIZE] = {0};
+		switch (process_hooks(preq, hook_msg, sizeof(hook_msg), pbs_python_set_interrupt)) {
+			case 0: /* explicit reject */
+			case 1: /* no recreate request as there are only read permissions */
+			case 2: /* no hook script executed - go ahead and accept event*/
+				break;
+			default:
+				log_event(PBSEVENT_DEBUG2, PBS_EVENTCLASS_HOOK, LOG_INFO, __func__,
+					"resv_confirm event: accept req by default");
 		}
 		account_recordResv(PBS_ACCT_CR, presv, tmp_buf);
 		if (tmp_buf != buf) {

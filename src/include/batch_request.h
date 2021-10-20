@@ -106,8 +106,9 @@ struct rq_manage {
 /* DeleteJobList */
 struct rq_deletejoblist {
 	int rq_count;
+	int mails;
 	char **rq_jobslist;
-	int rq_resume;
+	bool rq_resume;
 	int jobid_to_resume;
 	int subjobid_to_resume;
 };
@@ -173,6 +174,13 @@ struct rq_runjob {
 	char rq_jid[PBS_MAXSVRJOBID + 1];
 	char *rq_destin;
 	unsigned long rq_resch;
+};
+
+/* JobObit */
+struct rq_jobobit {
+	struct job *rq_pjob;
+	char rq_jid[PBS_MAXSVRJOBID + 1];
+	char *rq_destin;
 };
 
 /* SignalJob */
@@ -308,6 +316,7 @@ struct batch_request {
 		char rq_rdytocommit[PBS_MAXSVRJOBID + 1];
 		char rq_commit[PBS_MAXSVRJOBID + 1];
 		struct rq_manage rq_delete;
+		struct rq_manage rq_resresvbegin;
 		struct rq_deletejoblist rq_deletejoblist;
 		struct rq_hold rq_hold;
 		char rq_locate[PBS_MAXSVRJOBID + 1];
@@ -324,6 +333,7 @@ struct batch_request {
 		char rq_rerun[PBS_MAXSVRJOBID + 1];
 		struct rq_rescq rq_rescq;
 		struct rq_runjob rq_run;
+		struct rq_jobobit rq_obit;
 		struct rq_selstat rq_select;
 		int rq_shutdown;
 		struct rq_signal rq_signal;
@@ -403,7 +413,6 @@ extern int decode_DIS_UserCred(int, struct batch_request *);
 extern int decode_DIS_JobFile(int, struct batch_request *);
 extern int decode_DIS_CopyHookFile(int, struct batch_request *);
 extern int decode_DIS_DelHookFile(int, struct batch_request *);
-extern int decode_DIS_JobObit(int, struct batch_request *);
 extern int decode_DIS_Manage(int, struct batch_request *);
 extern int decode_DIS_DelJobList(int, struct batch_request *);
 extern int decode_DIS_MoveJob(int, struct batch_request *);
@@ -428,7 +437,6 @@ extern int decode_DIS_Cred(int, struct batch_request *);
 extern int encode_DIS_failover(int, struct batch_request *);
 extern int encode_DIS_CopyFiles(int, struct batch_request *);
 extern int encode_DIS_CopyFiles_Cred(int, struct batch_request *);
-extern int encode_DIS_JobObit(int, struct batch_request *);
 extern int encode_DIS_Register(int, struct batch_request *);
 extern int encode_DIS_TrackJob(int, struct batch_request *);
 extern int encode_DIS_reply(int, struct batch_reply *);

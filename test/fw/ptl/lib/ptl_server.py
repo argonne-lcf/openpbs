@@ -288,7 +288,9 @@ class Server(Wrappers):
         if self.isUp():
             if not self.stop():
                 return False
-        return self.start()
+        start_rc = self.start()
+        self.expect(NODE, {'state=state-unknown,down': 0})
+        return start_rc
 
     def log_match(self, msg=None, id=None, n=50, tail=True, allmatch=False,
                   regexp=False, max_attempts=None, interval=None,
@@ -580,7 +582,8 @@ class Server(Wrappers):
         Remove all the nodes from PBS
         """
         try:
-            self.manager(MGR_CMD_DELETE, VNODE, id="@default")
+            self.manager(MGR_CMD_DELETE, VNODE, id="@default",
+                         runas=ROOT_USER)
         except PbsManagerError as e:
             if "Unknown node" not in e.msg[0]:
                 raise
@@ -1296,6 +1299,13 @@ class Server(Wrappers):
         if len(job_ids) > 100:
             for host, pids in host_pid_map.items():
                 chunks = [pids[i:i + 5000] for i in range(0, len(pids), 5000)]
+                pbsnodes = os.path.join(
+                    self.client_conf['PBS_EXEC'], 'bin', 'pbsnodes')
+                ret = self.du.run_cmd(
+                    self.hostname, [pbsnodes, '-v', host, '-F', 'json'],
+                    logerr=False, level=logging.DEBUG, sudo=True)
+                pbsnodes_json = json.loads('\n'.join(ret['out']))
+                host = pbsnodes_json['nodes'][host]['Mom']
                 for chunk in chunks:
                     self.du.run_cmd(host, ['kill', '-9'] + chunk,
                                     runas=ROOT_USER, logerr=False)
@@ -1857,7 +1867,15 @@ class Server(Wrappers):
             except PbsManagerError as e:
                 rc = e.rc
             if rc:
-                if len(self.status(NODE)) > 0:
+                node_length = 0
+                try:
+                    node_length = len(self.status(NODE))
+                except PbsStatusError as err:
+                    if "Server has no node list" not in err.msg[0]:
+                        self.logger.error(
+                            "Error while checking node length:" + str(err))
+                        return False
+                if node_length > 0:
                     self.logger.error("create_moms: Error deleting all nodes")
                     return False
 
@@ -1869,7 +1887,9 @@ class Server(Wrappers):
             attrib = {}
 
         error = False
+        momnum = 0
         for hostname in momhosts:
+            momnum += 1
             _pconf = self.du.parse_pbs_config(hostname)
             if 'PBS_HOME' in _pconf:
                 _hp = _pconf['PBS_HOME']
@@ -1881,6 +1901,7 @@ class Server(Wrappers):
             _np_conf = _pconf
             _np_conf['PBS_START_SERVER'] = '0'
             _np_conf['PBS_START_SCHED'] = '0'
+            _np_conf['PBS_START_COMM'] = '0'
             _np_conf['PBS_START_MOM'] = '1'
             for i in range(0, num * step_port, step_port):
                 _np = os.path.join(_hp, home_prefix + str(i))
@@ -1908,7 +1929,10 @@ class Server(Wrappers):
                     attrib['port'] = port
                     if name is None:
                         name = hostname.split('.')[0]
-                    _n = name + '-' + str(i)
+                    if momnum == 1:
+                        _n = name + '-' + str(i)
+                    else:
+                        _n = name + str(momnum) + '-' + str(i)
                     rc = self.manager(MGR_CMD_CREATE, NODE, attrib, id=_n)
                     if rc != 0:
                         self.logger.error("error creating node " + _n)
@@ -2255,7 +2279,7 @@ class Server(Wrappers):
                 try:
                     fs_info = self.schedulers[
                         self.dflt_sched_name
-                    ].query_fairshare(
+                    ].fairshare.query_fairshare(
                         name=job[entity])
                     if fs_info is not None and 'TREEROOT' in fs_info.perc:
                         f_value['fair_share_perc'] = \

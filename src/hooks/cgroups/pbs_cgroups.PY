@@ -902,6 +902,11 @@ class HookUtils(object):
                 'name': 'resvsub',
                 'handler': None
             }
+            if hasattr(pbs, "MODIFYRESV"):
+                self.hook_events[pbs.MODIFYRESV] = {
+                    'name': 'modifyresv',
+                    'handler': None
+                }
             self.hook_events[pbs.MOVEJOB] = {
                 'name': 'movejob',
                 'handler': None
@@ -924,6 +929,21 @@ class HookUtils(object):
                 'name': 'provision',
                 'handler': None
             }
+            if hasattr(pbs, "RESV_END"):
+                self.hook_events[pbs.RESV_END] = {
+                'name': 'resv_end',
+                'handler': None
+                }
+            if hasattr(pbs, "RESV_BEGIN"):
+                self.hook_events[pbs.RESV_BEGIN] = {
+                'name': 'resv_begin',
+                'handler': None
+                }
+            if hasattr(pbs, "RESV_CONFIRM"):
+                self.hook_events[pbs.RESV_CONFIRM] = {
+                'name': 'resv_confirm',
+                'handler': None
+                }
             self.hook_events[pbs.EXECJOB_BEGIN] = {
                 'name': 'execjob_begin',
                 'handler': self._execjob_begin_handler
@@ -2023,6 +2043,53 @@ class NodeUtils(object):
                 gpus[gpuid]['gis'] = {}
             gpus[gpuid]['gis'][giid] = gi
 
+        # Find all MIG UUIDs using nvidia-smi -L
+        # and update it later while finding the CIs
+        cmd = [self.cfg['nvidia-smi'], '-L']
+        pbs.logmsg(pbs.EVENT_DEBUG4, 'NVIDIA SMI command: %s' % cmd)
+        time_start = time.time()
+        out = []
+
+        try:
+            # Try running the nvidia-smi command
+            process = subprocess.Popen(cmd, shell=False,
+                                       stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE,
+                                       universal_newlines=True)
+            out = process.communicate()[0].split('\n')
+        except Exception:
+            pbs.logmsg(pbs.EVENT_DEBUG4, 'Failed to execute: %s' %
+                       " ".join(cmd))
+            pbs.logmsg(pbs.EVENT_DEBUG3, '%s: No MIGs found' % caller_name())
+            return
+        elapsed_time = time.time() - time_start
+        if elapsed_time > 2.0:
+            pbs.logmsg(pbs.EVENT_DEBUG,
+                       '%s: nvidia-smi call took %f seconds' %
+                       (caller_name(), elapsed_time))
+
+        # format is:
+        # GPU gpuID: gpu_name (UUID: GPU UUID)
+        # MIG xg.ygb      Device  0: (UUID: MIG-UUID)
+        # MIG xg.ygb      Device  1: (UUID: MIG-UUID)
+
+        # Map (gpu_id, instance_id) to a MIG UUID
+        uuid_map = dict()
+        r_gpu = re.compile(r'\s*GPU\s(\d+)')
+        r_mig = re.compile(r'\s*MIG.*Device\s*(\d+)')
+        current_gpu = 0
+        for out_line in out:
+            gpu_match = r_gpu.match(out_line)
+            mig_match = r_mig.match(out_line)
+            if gpu_match:
+                current_gpu = int(gpu_match.group(1))
+                uuid_map[current_gpu] = dict()
+            if mig_match:
+                mig_uuid = out_line.split()[-1].rstrip(")")
+                uuid_map[current_gpu][int(mig_match.group(1))] = mig_uuid
+
+        pbs.logmsg(pbs.EVENT_DEBUG4, "uuid map: %s" % str(uuid_map))
+
         # now find all CIs
         cmd = [self.cfg['nvidia-smi'], 'mig', '-lci']
         pbs.logmsg(pbs.EVENT_DEBUG4, 'NVIDIA SMI command: %s' % cmd)
@@ -2060,10 +2127,16 @@ class NodeUtils(object):
         # |   0      7       MIG 1g.5gb       0         0          0:1     |
         r = re.compile(
             r'^\|\s+(\d+)\s+(\d+)\s+MIG\s+\S+\s+\d+\s+(\d+)\s+(\S+\s+)?\|$')
+
+        uuid_count = 0
+        gpu_num = 0
         for out_line in out:
             match = r.match(out_line)
             if not match:
                 continue
+            # reset count if a new gpu is parsed
+            if gpu_num != int(match.group(1)):
+                uuid_count = 0
             gpu_num = int(match.group(1))
             gpuid = 'nvidia%d' % gpu_num
             giid = int(match.group(2))
@@ -2071,7 +2144,8 @@ class NodeUtils(object):
             minor = self._discover_mig_minor(gpu_num, giid, ciid)
             if minor == -1:
                 continue
-            uuid = 'MIG-%s/%s/%s' % (gpus[gpuid]['uuid'], giid, ciid)
+            uuid = uuid_map[gpu_num][uuid_count]
+            uuid_count += 1
             ci = {'minor': minor, 'gi': giid, 'ci': ciid, 'uuid': uuid}
             pbs.logmsg(pbs.EVENT_DEBUG4, 'CI found %s' % str(ci))
             if 'cis' not in gpus[gpuid]['gis'][giid]:
@@ -2203,8 +2277,8 @@ class NodeUtils(object):
                        caller_name())
         cpuinfo['physical_cpus'] = int(cpuinfo['logical_cpus']
                                        // cpuinfo['hyperthreads_per_core'])
-        wanted_keys = ['physical_cpus', 'logical_cpus','hyperthreads_per_core',
-                       'hyperthreads']
+        wanted_keys = ['physical_cpus', 'logical_cpus',
+                       'hyperthreads_per_core', 'hyperthreads']
         cpuinfo_short = dict((k, cpuinfo[k])
                              for k in wanted_keys if k in cpuinfo)
         pbs.logmsg(pbs.EVENT_DEBUG4, "%s returning: %s"
@@ -3001,7 +3075,7 @@ class CgroupUtils(object):
                 prefix = subsys + '.2MB.'
             elif subsys == 'memsw':
                 prefix = 'memory.' + subsys + '.'
-            elif subsys in ['freezer', 'systemd']:
+            elif subsys in ['systemd', 'perf_event']:
                 prefix = ''
             else:
                 prefix = subsys + '.'
@@ -3017,6 +3091,39 @@ class CgroupUtils(object):
         """
         pbs.logmsg(pbs.EVENT_DEBUG4, '%s: Method called' % caller_name())
         paths = {}
+        subsys_to_discover = {'blkio', 'cpu', 'cpuacct', 'cpuset', 'devices',
+                              'freezer', 'hugetlb', 'memory', 'net_cls',
+                              'net_prio', 'perf_event', 'pids', 'rdma',
+                              'systemd'}
+        subsys_to_skip = set()
+
+        # First deal with the ones with paths set in the configuration file
+        for subsys in subsys_to_discover:
+            if (subsys in self.cfg['cgroup']
+                    and 'mount_path' in self.cfg['cgroup'][subsys]
+                    and self.cfg['cgroup'][subsys]['mount_path']):
+                flags = []
+                if (subsys == 'cpuset'
+                        and os.path.exists(os.path.join(self.cfg['cgroup']
+                                                                ['cpuset']
+                                                                ['mount_path'],
+                                                        'cpus'))):
+                    flags = ['noprefix']
+                paths[subsys] = \
+                    self._assemble_path(subsys,
+                                        self.cfg['cgroup'][subsys]
+                                                ['mount_path'],
+                                        flags)
+                # memory -> memsw, different prefix
+                if (subsys == 'memory'):
+                    paths['memsw'] = \
+                        self._assemble_path(subsys,
+                                            self.cfg['cgroup']['memory']
+                                                    ['mount_path'],
+                                            flags)
+                subsys_to_skip.add(subsys)
+        subsys_to_discover -= subsys_to_skip
+
         # Loop through the mounts and collect the ones for cgroups
         with open(os.path.join(os.sep, 'proc', 'mounts'), 'r') as desc:
             for line in desc:
@@ -3026,21 +3133,28 @@ class CgroupUtils(object):
                 # It is possible to have more than one cgroup mounted in
                 # the same place, so check them all for each mount.
                 flags = entries[3].split(',')
-                for subsys in ['blkio', 'cpu', 'cpuacct', 'cpuset', 'devices',
-                               'freezer', 'hugetlb', 'pids']:
-                    if subsys in flags:
-                        paths[subsys] = self._assemble_path(subsys, entries[1],
-                                                            flags)
-                if 'memory' in flags:
-                    paths['memory'] = \
-                        self._assemble_path('memory', entries[1], flags)
-                    # memory and memsw share a common mount point,
-                    # but use a different prefix
-                    paths['memsw'] = \
-                        self._assemble_path('memsw', entries[1], flags)
-                if 'systemd' in flags or 'name=systemd' in flags:
-                    paths['systemd'] = \
-                        self._assemble_path('systemd', entries[1], flags)
+                for subsys in subsys_to_discover:
+                    if (subsys in flags
+                            or (subsys == 'systemd'
+                                and ('name=systemd' in flags))):
+                        subsys_path_candidate = \
+                            self._assemble_path(subsys, entries[1], flags)
+                        # If there are more than one option, prefer shortest
+                        if (subsys not in paths
+                            or (len(paths[subsys])
+                                > len(subsys_path_candidate))):
+                            if subsys in paths:
+                                pbs.logmsg(pbs.EVENT_DEBUG3,
+                                           '_get_paths: shorter path+prefix '
+                                           '%s used for subsystem %s'
+                                           % (subsys_path_candidate, subsys))
+                            if subsys == 'memory':
+                                # memory and memsw share a common mount point,
+                                # but use a different prefix
+                                paths['memsw'] = \
+                                    self._assemble_path('memsw', entries[1],
+                                                        flags)
+                            paths[subsys] = subsys_path_candidate
 
         # if a host does not have any cgroup controllers mounted
         # don't panic here, let main code handle it by just accepting event
@@ -3366,6 +3480,13 @@ class CgroupUtils(object):
         defaults['cgroup']['hugetlb']['reserve_percent'] = 0
         defaults['cgroup']['hugetlb']['reserve_amount'] = '0MB'
         defaults['cgroup']['hugetlb']['vnode_hidden_mb'] = 1
+
+        # These are unmanaged -- if enabled only creation/removal
+        # and filling in 'tasks' are currently performed
+        defaults['cgroup']['blkio'] = {}
+        defaults['cgroup']['blkio']['enabled'] = False
+        defaults['cgroup']['freezer'] = {}
+        defaults['cgroup']['freezer']['enabled'] = False
         defaults['cgroup']['net_cls'] = {}
         defaults['cgroup']['net_cls']['enabled'] = False
         defaults['cgroup']['net_prio'] = {}
@@ -3374,6 +3495,8 @@ class CgroupUtils(object):
         defaults['cgroup']['perf_event']['enabled'] = False
         defaults['cgroup']['pids'] = {}
         defaults['cgroup']['pids']['enabled'] = False
+        defaults['cgroup']['rdma'] = {}
+        defaults['cgroup']['rdma']['enabled'] = False
 
         # Identify the config file and read in the data
         config_file = ''
@@ -3641,7 +3764,9 @@ class CgroupUtils(object):
                    % (mem_avail, vmem_avail, hpmem_avail))
 
         for key in self.paths:
-            if key in ('blkio', 'cpu', 'cpuacct', 'freezer', 'systemd'):
+            if key in ('blkio', 'cpu', 'cpuacct', 'freezer',
+                       'net_cls', 'net_prio', 'perf_event',
+                       'pids', 'rdma', 'systemd'):
                 continue
             if not self.enabled(key):
                 continue
@@ -3726,12 +3851,8 @@ class CgroupUtils(object):
                                            '= %s'
                                            % (caller_name(), jobid, key,
                                               assigned[jobid][key]['list']))
-                elif key == 'pids':
-                    pbs.logmsg(pbs.EVENT_DEBUG4, '%s: subsystem %s' %
-                               (caller_name(), key))
-                elif key == 'systemd':
-                    pbs.logmsg(pbs.EVENT_DEBUG4, '%s: subsystem %s' %
-                               (caller_name(), key))
+                # Note: unmanaged but known subsystems should be filtered
+                # at the top of the loop body
                 else:
                     pbs.logmsg(pbs.EVENT_DEBUG4, '%s: Unknown subsystem %s' %
                                (caller_name(), key))
@@ -3757,6 +3878,8 @@ class CgroupUtils(object):
             # if we get a non-str type then convert
             # before calling splitlines
             # should not happen since we pass universal_newlines True
+            # Note: some versions prepend "Version=", other versions
+            # add a more precise version in parentheses after a space
             out_split = stringified_output(out).splitlines()
             ver = int(re.sub(r'Version=\D*(\d+)', r'\1',
                              out_split[0].split()[0]))

@@ -146,10 +146,8 @@ int get_num_servers(void);
 typedef struct svr_conn {
 	int sd;                      /* File descriptor for the open socket */
 	int state;                   /* Connection state */
-	time_t last_used_time;       /* Last used time for the connection */
 	char name[PBS_MAXSERVERNAME + 1];  /* server name */
 	int port;                    /* server port */
-	int from_sched;              /* flag to indicate whether this conn is from sched or not */
 } svr_conn_t;
 
 typedef struct svr_conns_list {
@@ -221,10 +219,8 @@ struct batch_reply
 		pbs_list_head brp_status; /* status (svr) replies */
 		struct batch_status *brp_statc; /* status (cmd) replies) */
 		struct {
-			int tot_jobs;
-			int tot_rpys;
-			int tot_arr_jobs;
-			struct batch_deljob_status *brp_delstatc;
+			void *undeleted_job_idx; /* tracking undeleted jobs */
+			struct batch_deljob_status *brp_delstatc; /* list of failed jobs with errcode */
 		} brp_deletejoblist;
 		struct {
 			int brp_txtlen;
@@ -267,6 +263,7 @@ struct batch_reply
 #define PBS_BATCH_ReserveResc		25
 #define PBS_BATCH_ReleaseResc		26
 #define PBS_BATCH_FailOver		27
+#define PBS_BATCH_JobObit		28
 #define PBS_BATCH_StageIn		48
 /* Unused -- #define PBS_BATCH_AuthenResvPort 49 */
 #define PBS_BATCH_OrderJob		50
@@ -274,7 +271,7 @@ struct batch_reply
 #define PBS_BATCH_RegistDep		52
 #define PBS_BATCH_CopyFiles		54
 #define PBS_BATCH_DelFiles		55
-#define PBS_BATCH_JobObit		56
+/* Unused -- #define PBS_BATCH_JobObit 56 */
 #define PBS_BATCH_MvJobFile		57
 #define PBS_BATCH_StatusNode		58
 #define PBS_BATCH_Disconnect		59
@@ -287,6 +284,7 @@ struct batch_reply
 #define PBS_BATCH_SubmitResv		70
 #define PBS_BATCH_StatusResv		71
 #define PBS_BATCH_DeleteResv		72
+#define PBS_BATCH_BeginResv		76
 #define PBS_BATCH_UserCred		73
 /* Unused -- #define PBS_BATCH_UserMigrate		74 */
 #define PBS_BATCH_ConfirmResv		75
@@ -409,11 +407,13 @@ int get_svr_inst_fd(int vfd, char *svr_inst_id);
 int random_srv_conn(int fd, svr_conn_t **svr_conns);
 int get_obj_location_hint(char *, int obj_type);
 char *PBS_get_server(char *, char *, uint *);
-int encode_DIS_JobsList(int sock, char **jobs_list, int numofjobs);
 int get_server_fd_from_jid(int c, char *jobid);
 int multi_svr_op(int fd);
 int get_job_svr_inst_id(int c, char *job_id);
 
+int pbs_register_sched_msvr_instance(const char *sched_id, int primary_conn_id, int secondary_conn_id);
+void pbs_connect_msvr_instance(svr_conn_t *conn);
+int pbs_disconnect_msvr_instance(svr_conn_t *svr_conn);
 #ifdef __cplusplus
 }
 #endif

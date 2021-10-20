@@ -55,13 +55,13 @@ enum counts_on_run {
  *      query_server - creates a structure of arrays consisting of a server
  *                      and all the queues and jobs that reside in that server
  */
-server_info *query_server(status *policy, int pbs_sd);
+server_info *query_server(status *pol, int pbs_sd);
 
 /*
  *	query_server_info - collect information out of a statserver call
  *			    into a server_info structure
  */
-server_info *query_server_info(status *policy, struct batch_status *server);
+server_info *query_server_info(status *pol, struct batch_status *server);
 
 /*
  * 	query_server_dyn_res - execute all configured server_dyn_res scripts
@@ -89,24 +89,14 @@ schd_resource *find_resource_by_str(schd_resource *reslist, const std::string& n
 schd_resource *find_resource(schd_resource *reslist, resdef *def);
 
 /*
- *	free_server_info - free the space used by a server_info structure
- */
-void free_server_info(server_info *sinfo);
-
-/*
  *      free_resource - free a resource struct
  */
-void free_resource(schd_resource *res);
+void free_resource(schd_resource *resp);
 
 /*
  *      free_resource_list - free a resource list
  */
-void free_resource_list(schd_resource *res_list);
-
-/*
- *      new_server_info - allocate and initalize a new server_info struct
- */
-server_info *new_server_info(int limallocflag);
+void free_resource_list(schd_resource *reslist);
 
 /*
  *      new_resource - allocate and initialize new resoruce struct
@@ -142,7 +132,7 @@ int create_server_arrays(server_info *sinfo);
 /*
  *	copy_server_arrays - copy server's jobs and all_resresv arrays
  */
-int copy_server_arrays(server_info *nsinfo, server_info *osinfo);
+int copy_server_arrays(server_info *nsinfo, const server_info *osinfo);
 
 
 /*
@@ -150,12 +140,6 @@ int copy_server_arrays(server_info *nsinfo, server_info *osinfo);
  *                       jobs not in the exiting state
  */
 int check_exit_job(resource_resv *job, const void *arg);
-
-/*
- *      check_run_resv - function used by resv_filter to filter out
- *                       non-running reservations
- */
-int check_run_resv(resource_resv *resv, const void *arg);
 
 /*
  *
@@ -191,11 +175,6 @@ int check_running_job_not_in_reservation(resource_resv *job, const void *arg);
  *				running reservations
  */
 int check_resv_running_on_node(resource_resv *resv, const void *arg);
-
-/*
- *      dup_server - duplicate a server_info struct
- */
-server_info *dup_server_info(server_info *osinfo);
 
 /*
  *      dup_resource_list - dup a resource list
@@ -254,35 +233,25 @@ int is_unassoc_node(node_info *ninfo, void *arg);
 counts *new_counts(void);
 
 /*
- *      free_counts - free a counts structure
- */
-void free_counts(counts *cts);
-
-/*
  *      free_counts_list - free a list of counts structures
  */
-void free_counts_list(counts *ctslist);
+void free_counts_list(counts_umap &ctslist);
 
 /*
- *      dup_counts - duplicate a counts structure
+ *	dup_counts_umap - duplicate counts_umap
  */
-counts *dup_counts(counts *octs);
-
-/*
- *      dup_counts_list - duplicate a counts list
- */
-counts *dup_counts_list(counts *ctslist);
+counts_umap dup_counts_umap (const counts_umap &omap);
 
 /*
  *      find_counts - find a counts structure by name
  */
-counts *find_counts(counts *ctslist, const char *name);
+counts *find_counts(counts_umap &ctslist, const std::string &name);
 
 /*
  *      find_alloc_counts - find a counts structure by name or allocate a new
  *                          counts, name it, and add it to the end of the list
  */
-counts *find_alloc_counts(counts *ctslist, const char *name);
+counts *find_alloc_counts(counts_umap &ctslist, const std::string &name);
 
 /*
  *      update_counts_on_run - update a counts struct on the running of a job
@@ -300,13 +269,14 @@ void update_counts_on_end(counts *cts, resource_req *resreq);
  *			max, we free the old, and dup the new and attach it
  *			in.
  *
- *	  \param cmax    - current max
+ *	  \param cmax    - current max that will be updated.
  *	  \param new     - new counts lists.  If anything in this list is
  *			   greater than the cur_max, it needs to be dup'd.
  *
- *	  returns the new max or NULL on error
+ *	  returns void
  */
-counts *counts_max(counts *cmax, counts *ncounts);
+void counts_max(counts_umap &cmax, counts_umap &ncounts);
+void counts_max(counts_umap &cmax, counts *ncounts);
 
 /*
  *      check_run_job - function used by resource_resv_filter to filter out
@@ -318,6 +288,9 @@ int check_run_job(resource_resv *job, const void *arg);
  *      update_universe_on_end - update a pbs universe when a job/resv ends
  */
 void update_universe_on_end(status *policy, resource_resv *resresv, const char *job_state, unsigned int flags);
+
+bool update_universe_on_run(status *policy, int pbs_sd, resource_resv *rr, std::vector<nspec *> &orig_ns, unsigned int flags);
+bool update_universe_on_run(status *policy, int pbs_sd, resource_resv *rr, unsigned int flags);
 
 /*
  *
@@ -419,12 +392,6 @@ void
 update_total_counts_on_end(server_info *si, queue_info* qi,
 	resource_resv *rr, int mode);
 
-/*
- * Refreshes total counts list for server & queue by deleting the
- * old structures and duplicating new one from running counts
- */
-void refresh_total_counts(server_info *sinfo);
-
 /**
  * @brief - get a unique rank to uniquely identify an object
  * @return int
@@ -468,5 +435,7 @@ int compare_resource_avail(schd_resource *r1, schd_resource *r2);
 node_info **dup_unordered_nodes(node_info **old_unordered_nodes, node_info **nnodes);
 
 status *dup_status(status *ost);
+
+struct batch_status *send_statserver(int virtual_fd, struct attrl *attrib, char *extend);
 
 #endif	/* _SERVER_INFO_H */

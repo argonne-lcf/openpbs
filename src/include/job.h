@@ -547,6 +547,7 @@ struct job {
 		int ji_jsversion;   /* job structure version - JSVERSION */
 		int ji_svrflags;    /* server flags */
 		time_t ji_stime;    /* time job started execution */
+		time_t ji_obittime; /* time job has ended execution */
 		char ji_jobid[PBS_MAXSVRJOBID + 1];   /* job identifier */
 		char ji_fileprefix[PBS_JOBBASE + 1];  /* no longer used */
 		char ji_queue[PBS_MAXQUEUENAME + 1];  /* name of current queue */
@@ -797,6 +798,7 @@ task_find	(job		*pjob,
  */
 #define JOB_SVFLG_AdmSuspd 0x200000 /* Job is suspended for maintenance */
 #define JOB_SVFLG_RescUpdt_Rqd 0x400000 /* Broadcast of rsc usage is required */
+#define JOB_SVFLG_AlienJob 0x800000 /* job is owned by another server in a msvr setup */
 
 #define MAIL_NONE  (int)'n'
 #define MAIL_ABORT (int)'a'
@@ -1007,6 +1009,7 @@ extern int   modify_job_attr(job *, svrattrl *, int, int *);
 extern char *prefix_std_file(job *, int);
 extern void  cat_default_std(job *, int, char *, char **);
 extern int   set_objexid(void *, int, attribute *);
+extern bool update_deljob_rply(struct batch_request *, char *, int);
 #if 0
 extern int   site_check_user_map(job *, char *);
 #endif

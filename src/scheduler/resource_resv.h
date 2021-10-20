@@ -51,7 +51,7 @@ free_resource_resv_array_chunk(th_data_free_resresv *data);
 /*
  *      free_resource_resv_array - free an array of resource resvs
  */
-void free_resource_resv_array(resource_resv **resresv);
+void free_resource_resv_array(resource_resv **resresv_arr);
 
 
 /*
@@ -135,7 +135,7 @@ resource_req *find_alloc_resource_req_by_str(resource_req *reqlist, char *name);
 /*
  * find resource_count by resource definition or allocate
  */
-resource_count *find_alloc_resource_count(resource_count *reqlist, resdef *def);
+resource_count *find_alloc_resource_count(resource_count *rcountlist, resdef *def);
 
 /*
  *      free_resource_req_list - frees memory used by a resource_req list
@@ -150,7 +150,7 @@ void free_resource_req(resource_req *req);
 /*
  *      free_resource_count_list - frees memory used by a resource_count list
  */
-void free_resource_count_list(resource_count *list);
+void free_resource_count_list(resource_count *rcount);
 
 /*
  *	free_resource_count - free memory used by a resource_count structure
@@ -174,7 +174,7 @@ resource_req *dup_selective_resource_req_list(resource_req *oreq, std::unordered
 /*
  *	dup_resource_count_list - duplicate a resource_req list
  */
-resource_count *dup_resource_count_list(resource_count *oreq);
+resource_count *dup_resource_count_list(resource_count *orcount);
 
 /*
  *      dup_resource_req - duplicate a resource_req struct
@@ -184,13 +184,13 @@ resource_req *dup_resource_req(resource_req *oreq);
 /*
  *	dup_resource_count - duplicate a resource_count struct
  */
-resource_count *dup_resource_count(resource_count *oreq);
+resource_count *dup_resource_count(resource_count *orcount);
 
 /*
  *      update_resresv_on_run - update information kept in a resource_resv
  *                              struct when one is started
  */
-void update_resresv_on_run(resource_resv *resresv, nspec **nspec_arr);
+void update_resresv_on_run(resource_resv *resresv, std::vector<nspec *>& nspec_arr);
 
 /*
  *      update_resresv_on_end - update a resource_resv structure when
@@ -296,12 +296,12 @@ chunk *new_chunk();
 /*
  *	dup_chunk_array - array copy constructor for array of chunk ptrs
  */
-chunk **dup_chunk_array(chunk **old_chunk_arr);
+chunk **dup_chunk_array(const chunk * const *old_chunk_arr);
 
 /*
  *	dup_chunk - copy constructor for chunk
  */
-chunk *dup_chunk(chunk *ochunk);
+chunk *dup_chunk(const chunk *ochunk);
 
 /*
  *	free_chunk_array - array destructor for array of chunk ptrs
@@ -312,28 +312,6 @@ void free_chunk_array(chunk **chunk_arr);
  *	free_chunk - destructor for chunk
  */
 void free_chunk(chunk *ch);
-
-/*
- *
- * find a resource resv by calling a caller provided comparison function
- *
- *	resresv_arr - array of resource_resvs to search
- *	int cmp_func(resource_resv *rl, void *cmp_arg)
- *	cmp_arg - opaque argument for cmp_func()
- *
- * return found resource_resv or NULL
- *
- */
-resource_resv *
-find_resource_resv_func(resource_resv **resresv_arr,
-	int (*cmp_func)(resource_resv*, void*), void *cmp_arg);
-/*
- *
- * function used by find_resource_resv_func to see if two subjobs are
- * part of the same job array (e.g., 1234[])
- *
- */
-int cmp_job_arrays(resource_resv *resresv, void *arg);
 
 /*
  * create_resource_req - create a new resource_req
@@ -348,7 +326,7 @@ resource_req *create_resource_req(const char *name, const char *value);
  *
  * return converted select string
  */
-std::string create_select_from_nspec(nspec **nspec_array);
+std::string create_select_from_nspec(std::vector<nspec *>& nspec_arr);
 
 /* function returns true if job/resv is in a state which it can be run */
 int in_runnable_state(resource_resv *resresv);

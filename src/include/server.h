@@ -57,6 +57,7 @@ extern "C" {
  * control the operation of the server itself.  This includes
  * the server attributes and resource (limits).
  */
+#include <stdbool.h>
 #ifndef	_GRUNT_H
 #include "grunt.h"
 #endif
@@ -254,6 +255,8 @@ void clean_saved_rsc(void*);
 int process_status_reply(int);
 void *get_peersvr_from_svrid(char *);
 void update_msvr_stat(unsigned long, msvr_stat_type_t);
+int ps_send_discard(char *, char *, char *, int);
+int open_ps_mtfd_for_execvnode(char *);
 
 /* end of multi-svr functions */
 

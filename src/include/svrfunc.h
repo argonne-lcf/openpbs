@@ -138,6 +138,7 @@ extern int compare_obj_hash(void *, int , void *);
 extern void panic_stop_db();
 extern void free_db_attr_list(pbs_db_attr_list_t *);
 extern void req_stat_svr_ready(struct work_task *);
+extern bool delete_pending_arrayjobs(struct batch_request *);
 
 #ifdef _PROVISION_H
 extern int find_prov_vnode_list(job *, exec_vnode_listtype *, char **);
@@ -173,7 +174,7 @@ extern void check_block(job *, char *);
 extern void free_nodes(job *);
 extern int job_route(job *);
 extern void rel_resc(job *);
-extern void remove_stagein(job *);
+extern int remove_stagein(job *);
 extern size_t check_for_cred(job *, char **);
 extern void svr_mailowner(job *, int, int, char *);
 extern void svr_mailowner_id(char *, job *, int, int, char *);

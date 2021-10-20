@@ -49,7 +49,7 @@
  *      query_queues - creates an array of queue_info structs which contain
  *                      an array of jobs
  */
-queue_info **query_queues(status *policy, int pbs_sd, server_info *sinfo);
+std::vector<queue_info *> query_queues(status *policy, int pbs_sd, server_info *sinfo);
 
 /*
  *      query_queue_info - collects information from a batch_status and
@@ -65,7 +65,7 @@ queue_info *new_queue_info(int limallocflag);
 /*
  *      free_queues - frees the memory for an array
  */
-void free_queues(queue_info **qinfo);
+void free_queues(std::vector<queue_info *> &qarr);
 
 /*
  *      update_queue_on_run - update the information kept in a qinfo structure
@@ -76,7 +76,7 @@ void update_queue_on_run(queue_info *qinfo, resource_resv *resresv, char *job_st
 /*
  *      dup_queues - duplicate the queues on a server
  */
-queue_info **dup_queues(queue_info **oqueues, server_info *nsinfo);
+std::vector<queue_info *> dup_queues(const std::vector<queue_info *> &oqueues, server_info *nsinfo);
 
 /*
  *
@@ -88,16 +88,18 @@ queue_info **dup_queues(queue_info **oqueues, server_info *nsinfo);
  *	return the found queue or NULL
  *
  */
-queue_info *find_queue_info(queue_info **qinfo_arr, const std::string& name);
+queue_info *find_queue_info(std::vector<queue_info *> &qinfo_arr, const std::string& name);
 
 /*
- *      update_queue_on_end - update a queue when a job has finished running
+ *	update_queue_on_end - update a queue when a job has finished running
  */
 void
 update_queue_on_end(queue_info *qinfo, resource_resv *resresv,
 	const char *job_state);
 
 int queue_in_partition(queue_info *qinfo, char *partition);
+
+struct batch_status *send_statqueue(int virtual_fd, char *id, struct attrl *attrib, char *extend);
 
 
 #endif /* _QUEUE_INFO_H */

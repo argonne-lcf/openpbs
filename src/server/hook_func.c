@@ -202,12 +202,16 @@ extern pbs_list_head svr_allhooks;
 extern pbs_list_head svr_queuejob_hooks;
 extern pbs_list_head svr_modifyjob_hooks;
 extern pbs_list_head svr_resvsub_hooks;
+extern pbs_list_head svr_modifyresv_hooks;
 extern pbs_list_head svr_movejob_hooks;
 extern pbs_list_head svr_runjob_hooks;
+extern pbs_list_head svr_jobobit_hooks;
 extern pbs_list_head svr_management_hooks;
 extern pbs_list_head svr_modifyvnode_hooks;
 extern pbs_list_head svr_periodic_hooks;
 extern pbs_list_head svr_provision_hooks;
+extern pbs_list_head svr_resv_confirm_hooks;
+extern pbs_list_head svr_resv_begin_hooks;
 extern pbs_list_head svr_resv_end_hooks;
 extern pbs_list_head svr_execjob_begin_hooks;
 extern pbs_list_head svr_execjob_prologue_hooks;
@@ -3791,6 +3795,10 @@ process_hooks(struct batch_request *preq, char *hook_msg, size_t msg_len,
 		hook_event = HOOK_EVENT_RESVSUB;
 		req_ptr.rq_job = (struct rq_quejob *)&preq->rq_ind.rq_queuejob;
 		head_ptr = &svr_resvsub_hooks;
+	} else if (preq->rq_type == PBS_BATCH_ModifyResv) {
+		hook_event = HOOK_EVENT_MODIFYRESV;
+		req_ptr.rq_manage = (struct rq_quejob *)&preq->rq_ind.rq_modify;
+		head_ptr = &svr_modifyresv_hooks;
 	} else if (preq->rq_type == PBS_BATCH_ModifyJob) {
 		hook_event = HOOK_EVENT_MODIFYJOB;
 		req_ptr.rq_manage = (struct rq_manage *)&preq->rq_ind.rq_modify;
@@ -3823,6 +3831,10 @@ process_hooks(struct batch_request *preq, char *hook_msg, size_t msg_len,
 				"Did not find a job tied to runjob request!");
 			return (-1);
 		}
+	} else if (preq->rq_type == PBS_BATCH_JobObit) {
+		hook_event = HOOK_EVENT_JOBOBIT;
+		req_ptr.rq_obit = (struct rq_jobobit *)&preq->rq_ind.rq_obit;
+		head_ptr = &svr_jobobit_hooks;
 	} else if (preq->rq_type == PBS_BATCH_Manager) {
 		hook_event = HOOK_EVENT_MANAGEMENT;
 		preq->rq_ind.rq_management.rq_reply = &preq->rq_reply;
@@ -3842,6 +3854,14 @@ process_hooks(struct batch_request *preq, char *hook_msg, size_t msg_len,
 		hook_event = HOOK_EVENT_RESV_END;
 		req_ptr.rq_manage = (struct rq_manage *)&preq->rq_ind.rq_delete;
 		head_ptr = &svr_resv_end_hooks;
+	} else if (preq->rq_type == PBS_BATCH_BeginResv) {
+		hook_event = HOOK_EVENT_RESV_BEGIN;
+		req_ptr.rq_manage = (struct rq_manage *)&preq->rq_ind.rq_resresvbegin;
+		head_ptr = &svr_resv_begin_hooks;
+	} else if (preq->rq_type == PBS_BATCH_ConfirmResv) {
+		hook_event = HOOK_EVENT_RESV_CONFIRM;
+		req_ptr.rq_run = (struct rq_runjob *)&preq->rq_ind.rq_run;
+		head_ptr = &svr_resv_confirm_hooks;
 	} else {
 		return (-1); /* unexpected event encountered */
 	}
@@ -3858,6 +3878,8 @@ process_hooks(struct batch_request *preq, char *hook_msg, size_t msg_len,
 			phook_next = (hook *)GET_NEXT(phook->hi_queuejob_hooks);
 		} else if (preq->rq_type == PBS_BATCH_SubmitResv) {
 			phook_next = (hook *)GET_NEXT(phook->hi_resvsub_hooks);
+		} else if (preq->rq_type == PBS_BATCH_ModifyResv) {
+			phook_next = (hook *)GET_NEXT(phook->hi_modifyresv_hooks);
 		} else if (preq->rq_type == PBS_BATCH_ModifyJob) {
 			phook_next = (hook *)GET_NEXT(phook->hi_modifyjob_hooks);
 		} else if (preq->rq_type == PBS_BATCH_MoveJob) {
@@ -3865,12 +3887,18 @@ process_hooks(struct batch_request *preq, char *hook_msg, size_t msg_len,
 		} else if (preq->rq_type == PBS_BATCH_RunJob || preq->rq_type == PBS_BATCH_AsyrunJob ||
 				preq->rq_type == PBS_BATCH_AsyrunJob_ack) {
 			phook_next = (hook *)GET_NEXT(phook->hi_runjob_hooks);
+		} else if (preq->rq_type == PBS_BATCH_JobObit) {
+			phook_next = (hook *)GET_NEXT(phook->hi_jobobit_hooks);
 		} else if (preq->rq_type == PBS_BATCH_Manager) {
 			phook_next = (hook *)GET_NEXT(phook->hi_management_hooks);
 		} else if (preq->rq_type == PBS_BATCH_ModifyVnode) {
 			phook_next = (hook *)GET_NEXT(phook->hi_modifyvnode_hooks);
 		} else if (preq->rq_type == PBS_BATCH_HookPeriodic) {
 			phook_next = (hook *)GET_NEXT(phook->hi_periodic_hooks);
+		} else if (preq->rq_type == PBS_BATCH_ConfirmResv) {
+			phook_next = (hook *)GET_NEXT(phook->hi_resv_confirm_hooks);
+		} else if (preq->rq_type == PBS_BATCH_BeginResv) {
+			phook_next = (hook *)GET_NEXT(phook->hi_resv_begin_hooks);
 		} else if (preq->rq_type == PBS_BATCH_DeleteResv || preq->rq_type == PBS_BATCH_ResvOccurEnd) {
 			phook_next = (hook *)GET_NEXT(phook->hi_resv_end_hooks);
 		} else {
@@ -4709,7 +4737,6 @@ recreate_request(struct batch_request *preq)
 			pbs_python_set_hook_debug_output_fp(fp_debug);
 		}
 	}
-
 	hook_output_param_init(&req_params);
 	if (preq->rq_type == PBS_BATCH_QueueJob) {
 		req_params.rq_job = (struct rq_quejob *)&preq->rq_ind.rq_queuejob;
@@ -4720,6 +4747,11 @@ recreate_request(struct batch_request *preq)
 		req_params.rq_job = (struct rq_quejob *)&preq->rq_ind.rq_queuejob;
 		snprintf(perf_label, sizeof(perf_label), "hook_%s_%s_%d", HOOKSTR_RESVSUB, preq->rq_ind.rq_queuejob.rq_jid, getpid());
 		rc =pbs_python_event_to_request(HOOK_EVENT_RESVSUB,
+			&req_params, perf_label, HOOK_PERF_HOOK_OUTPUT);
+	} else if (preq->rq_type == PBS_BATCH_ModifyResv) {
+		req_params.rq_manage = (struct manage *)&preq->rq_ind.rq_modify;
+		snprintf(perf_label, sizeof(perf_label), "hook_%s_%s_%d", HOOKSTR_MODIFYRESV, preq->rq_ind.rq_modify.rq_objname, getpid());
+		rc =pbs_python_event_to_request(HOOK_EVENT_MODIFYRESV,
 			&req_params, perf_label, HOOK_PERF_HOOK_OUTPUT);
 	} else if (preq->rq_type == PBS_BATCH_ModifyJob) {
 		req_params.rq_manage = (struct manage *)&preq->rq_ind.rq_modify;

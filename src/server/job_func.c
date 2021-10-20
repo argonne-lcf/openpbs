@@ -451,7 +451,6 @@ free_job_work_tasks(job *pj)
 
 		delete_task(pwt);
 	}
-
 }
 #endif
 
@@ -1096,6 +1095,9 @@ job_purge(job *pjob)
 	/* if open, close 5th pipes to/from Mom starter process */
 	if (pjob->ji_parent2child_moms_status_pipe != -1)
 		(void)close(pjob->ji_parent2child_moms_status_pipe);
+#else
+	if (pjob->ji_user)
+		wunloaduserprofile(pjob->ji_user);
 #endif
 #else	/* not PBS_MOM */
 	if ((!check_job_substate(pjob, JOB_SUBSTATE_TRANSIN)) &&

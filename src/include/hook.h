@@ -87,11 +87,15 @@ typedef enum hook_user hook_user;
 #define HOOK_EVENT_RESVSUB	0x04
 #define HOOK_EVENT_MOVEJOB	0x08
 #define HOOK_EVENT_RUNJOB	0x10
+#define HOOK_EVENT_JOBOBIT	0x800000
 #define HOOK_EVENT_PROVISION	0x20
 #define HOOK_EVENT_PERIODIC	0x8000
 #define HOOK_EVENT_RESV_END	0x10000
 #define HOOK_EVENT_MANAGEMENT	0x200000
 #define HOOK_EVENT_MODIFYVNODE	0x400000
+#define HOOK_EVENT_RESV_BEGIN 0x1000000
+#define HOOK_EVENT_RESV_CONFIRM 0x2000000
+#define HOOK_EVENT_MODIFYRESV 0x4000000
 
 
 /* mom hooks */
@@ -137,12 +141,16 @@ struct hook {
 	pbs_list_link	hi_queuejob_hooks;
 	pbs_list_link	hi_modifyjob_hooks;
 	pbs_list_link	hi_resvsub_hooks;
+	pbs_list_link	hi_modifyresv_hooks;
 	pbs_list_link	hi_movejob_hooks;
 	pbs_list_link	hi_runjob_hooks;
+	pbs_list_link	hi_jobobit_hooks;
 	pbs_list_link	hi_management_hooks;
 	pbs_list_link	hi_modifyvnode_hooks;
 	pbs_list_link 	hi_provision_hooks;
 	pbs_list_link 	hi_periodic_hooks;
+	pbs_list_link	hi_resv_confirm_hooks;
+	pbs_list_link	hi_resv_begin_hooks;
 	pbs_list_link	hi_resv_end_hooks;
 	pbs_list_link	hi_execjob_begin_hooks;
 	pbs_list_link	hi_execjob_prologue_hooks;
@@ -236,12 +244,16 @@ typedef struct hook hook;
 #define	HOOKSTR_QUEUEJOB	"queuejob"
 #define	HOOKSTR_MODIFYJOB	"modifyjob"
 #define	HOOKSTR_RESVSUB		"resvsub"
+#define	HOOKSTR_MODIFYRESV	"modifyresv"
 #define	HOOKSTR_MOVEJOB		"movejob"
 #define	HOOKSTR_RUNJOB		"runjob"
 #define HOOKSTR_PROVISION	"provision"
 #define HOOKSTR_PERIODIC	"periodic"
+#define HOOKSTR_RESV_CONFIRM "resv_confirm"
+#define HOOKSTR_RESV_BEGIN	"resv_begin"
 #define HOOKSTR_RESV_END	"resv_end"
 #define HOOKSTR_MANAGEMENT      "management"
+#define HOOKSTR_JOBOBIT		"jobobit"
 #define HOOKSTR_MODIFYVNODE      "modifyvnode"
 #define HOOKSTR_EXECJOB_BEGIN   "execjob_begin"
 #define HOOKSTR_EXECJOB_PROLOGUE "execjob_prologue"

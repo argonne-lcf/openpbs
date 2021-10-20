@@ -53,10 +53,10 @@
 #define IF_NEG_THEN_ZERO(a) (((a)>=(0))?(a):(0))
 
 /* multipliers [bw] means either btye or word */
-#define KILO		1024UL		/* number of [bw] in a kilo[bw] */
-#define MEGATOKILO	1024UL		/* number of mega[bw] in a kilo[bw] */
-#define GIGATOKILO	1048576UL	/* number of giga[bw] in a kilo[bw] */
-#define TERATOKILO	1073741824UL	/* number of tera[bw] in a kilo[bw] */
+#define KILO		1024L		/* number of [bw] in a kilo[bw] */
+#define MEGATOKILO	1024L		/* number of mega[bw] in a kilo[bw] */
+#define GIGATOKILO	1048576L	/* number of giga[bw] in a kilo[bw] */
+#define TERATOKILO	1073741824L	/* number of tera[bw] in a kilo[bw] */
 
 /* extra constants */
 #define FREE_DEEP 1		/* constant to pass to free_*_list */
@@ -327,6 +327,9 @@ enum resv_conf {
 /* job substate meaning node is provisioning */
 #define PROVISIONING_SUBSTATE "71"
 
+/* job substate meaning job is pre-running state */
+#define PRERUNNING_SUBSTATE "41"
+
 /* TRUE_FALSE indicates both true and false for collections of resources */
 enum { FALSE, TRUE, TRUE_FALSE };
 
@@ -382,11 +385,10 @@ enum incr_decr {
 };
 
 /* run update resresv flags is a bitfield = 0, 1, 2, 4, 8, ...*/
-enum run_update_resresv_flags
-{
+enum run_update_resresv_flags {
 	RURR_NO_FLAGS = 0,
 	RURR_ADD_END_EVENT = 1, /* add end events to calendar for job */
-	RURR_NOPRINT = 2       /* don't print messages */
+	RURR_NOPRINT = 2	/* don't print messages */
 	/* next value 4 */
 };
 

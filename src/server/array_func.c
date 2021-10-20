@@ -73,6 +73,7 @@
 /* External data */
 extern char *msg_job_end_stat;
 extern int   resc_access_perm;
+extern time_t time_now;
 
 /*
  * list of job attributes to copy from the parent Array job
@@ -147,10 +148,10 @@ static enum job_atr attrs_to_copy[] = {
  * @param[in]	id - Job Id.
  *
  * @return      Job Type
- * @retval	 0  - A regular job
- * @retval	-1  - A ArrayJob
- * @retval	 2  - A single subjob
- * @retval	-3  - A range of subjobs
+ * @retval	IS_ARRAY_NO  - A regular job
+ * @retval	IS_ARRAY_ArrayJob  - A ArrayJob
+ * @retval	IS_ARRAY_Single  - A single subjob
+ * @retval	IS_ARRAY_Range  - A range of subjobs
  */
 int
 is_job_array(char *id)
@@ -328,6 +329,9 @@ update_sj_parent(job *parent, job *sj, char *sjid, char oldstate, char newstate)
 void
 chk_array_doneness(job *parent)
 {
+	struct batch_request *preq;
+	char hook_msg[HOOK_MSG_SIZE] = {0};
+	int rc;
 	ajinfo_t *ptbl = NULL;
 
 	if (parent == NULL || parent->ji_ajinfo == NULL)
@@ -344,11 +348,31 @@ chk_array_doneness(job *parent)
 		parent->ji_qs.ji_un_type = JOB_UNION_TYPE_EXEC;
 		parent->ji_qs.ji_un.ji_exect.ji_momaddr = 0;
 		parent->ji_qs.ji_un.ji_exect.ji_momport = 0;
+
 		parent->ji_qs.ji_un.ji_exect.ji_exitstat = get_jattr_long(parent, JOB_ATR_exit_status);
 
 		check_block(parent, "");
 		if (check_job_state(parent, JOB_STATE_LTR_BEGUN)) {
 			char acctbuf[40];
+
+			parent->ji_qs.ji_obittime = time_now;
+			set_jattr_l_slim(parent, JOB_ATR_obittime, parent->ji_qs.ji_obittime, SET);
+
+			/* Allocate space for the jobobit hook event params */
+			preq = alloc_br(PBS_BATCH_JobObit);
+			if (preq) {
+				preq->rq_ind.rq_obit.rq_pjob = parent;
+				DBPRT(("rq_jobobit svr_setjobstate update parent job state to 'F'"));
+				svr_setjobstate(parent, JOB_STATE_LTR_FINISHED, JOB_SUBSTATE_FINISHED);
+				rc = process_hooks(preq, hook_msg, sizeof(hook_msg), pbs_python_set_interrupt);
+				if (rc == -1) {
+					log_err(-1, __func__, "rq_jobobit process_hooks call failed");
+				}
+				free_br(preq);
+			} else {
+				log_err(PBSE_INTERNAL, __func__, "rq_jobobit alloc failed");
+			}
+
 			/* if BEGUN, issue 'E' account record */
 			sprintf(acctbuf, msg_job_end_stat, parent->ji_qs.ji_un.ji_exect.ji_exitstat);
 			account_job_update(parent, PBS_ACCT_LAST);
@@ -836,6 +860,7 @@ dup_br_for_subjob(struct batch_request *opreq, job *pjob, int (*func)(struct bat
 			npreq->rq_ind.rq_deletejoblist = opreq->rq_ind.rq_deletejoblist;
 			npreq->rq_ind.rq_deletejoblist.rq_count = 1;
 			npreq->rq_ind.rq_deletejoblist.rq_jobslist = break_comma_list(pjob->ji_qs.ji_jobid);
+			npreq->rq_ind.rq_deletejoblist.jobid_to_resume = 0;
 			break;
 		case PBS_BATCH_DeleteJob:
 			npreq->rq_ind.rq_delete = opreq->rq_ind.rq_delete;

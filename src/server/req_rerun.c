@@ -141,6 +141,25 @@ force_reque(job *pjob)
 {
 	char  newstate;
 	int  newsubstate;
+	struct batch_request *preq;
+	char hook_msg[HOOK_MSG_SIZE] = {0};
+	int rc;
+
+	pjob->ji_qs.ji_obittime = time_now;
+	set_jattr_l_slim(pjob, JOB_ATR_obittime, pjob->ji_qs.ji_obittime, SET);
+
+	/* Allocate space for the jobobit hook event params */
+	preq = alloc_br(PBS_BATCH_JobObit);
+	if (preq == NULL) {
+		log_err(PBSE_INTERNAL, __func__, "rq_jobobit alloc failed");
+	} else {
+		preq->rq_ind.rq_obit.rq_pjob = pjob;
+		rc = process_hooks(preq, hook_msg, sizeof(hook_msg), pbs_python_set_interrupt);
+		if (rc == -1) {
+			log_err(-1, __func__, "rq_jobobit force_reque process_hooks call failed");
+		}
+		free_br(preq);
+	}
 
 	pjob->ji_momhandle = -1;
 	pjob->ji_mom_prot = PROT_INVALID;

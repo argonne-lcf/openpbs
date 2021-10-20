@@ -88,23 +88,17 @@ int check_new_reservations(status *policy, int pbs_sd, resource_resv **resvs, se
 /**
  *      confirm_reservation - attempts to confirm a resource reservation
  */
-int confirm_reservation(status *policy, int pbs_sd, resource_resv *nresv, server_info *sinfo);
-
-/**
- *      checks that vnodes associated to a reservation that are not
- *                               available
- */
-int check_vnodes_unavailable(resource_resv *resv);
+int confirm_reservation(status *policy, int pbs_sd, resource_resv *unconf_resv, server_info *nsinfo);
 
 /**
  * Release reousrces allocated to a reservation
  */
-void release_nodes(resource_resv *resc_resv);
+void release_nodes(resource_resv *resresv);
 
 /*
  *	create_resv_nodes - create a node universe for a reservation
  */
-node_info **create_resv_nodes(nspec **nspec_arr, server_info *sinfo);
+node_info **create_resv_nodes(std::vector<nspec *>& nspec_arr, server_info *sinfo);
 
 /*
  *	release_running_resv_nodes - adjust nodes resources for reservations that
@@ -112,13 +106,19 @@ node_info **create_resv_nodes(nspec **nspec_arr, server_info *sinfo);
  */
 void release_running_resv_nodes(resource_resv *resv, server_info *sinfo);
 
-/* Reduce resv_nodes of a reservation on pbs_ralter -lselect for running jobs */
-int ralter_reduce_chunks(resource_resv *resv);
+/* release chunks of the resv_nodes without running jobs on them */
+int resv_reduce_chunks(resource_resv *resv, selspec *spec);
 
 /* Will we try and confirm this reservation in this cycle */
 int will_confirm(resource_resv *resv, time_t server_time);
 
 /* wrapper for pbs_confirmresv */
 int send_confirmresv(int virtual_sd, resource_resv *resv, const char *location, unsigned long start, const char *extend);
+
+/* wrapper for pbs_statresv */
+struct batch_status *send_statresv(int virtual_fd, char *id, struct attrl *attrib, char *extend);
+
+/* Update jobs and nodes for resv */
+void modify_jobs_nodes_for_resv(resource_resv *resresv, time_t server_time);
 
 #endif /* _RESV_INFO_H */

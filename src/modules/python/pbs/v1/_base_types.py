@@ -1765,3 +1765,284 @@ class exec_vnode(_generic_attr):
         for v in vals:
             self.chunks.append(vchunk(v.strip("(").strip(")")))
 #: --------         EXPORTED TYPES DICTIONARY                      ---------
+
+
+import inspect
+
+
+# def logmsgstk(obj, msg=None, errlvl=_pbs_v1.LOG_ERROR):
+#     cls = obj.__class__
+#     if msg:
+#         _pbs_v1.logmsg(
+#             errlvl,
+#             f"{cls.__name__}:{hex(id(obj))}:{cls._msg_cnt}:{msg}")
+#     stack = inspect.stack()
+#     stack.pop(0)
+#     frame_num = 0
+#     while stack[::-1]:
+#         frame, file_name, line_num, func_name, lines, index = stack.pop(0)
+#         _pbs_v1.logmsg(
+#             errlvl,
+#             f"{cls.__name__}:{hex(id(obj))}:{cls._msg_cnt}[{frame_num}]:"
+#             f"{file_name}:{line_num}:{func_name}:{lines}).")
+#         del frame
+#         frame_num += 1
+#     cls._msg_cnt += 1
+
+
+class LogMutableMapping():
+    def __init__(self, *args, **kwargs):
+        if not hasattr(self.__class__, "_logmsgstk_cnt"):
+            # NOTE: this is not thread-safe
+            self.__class__._logmsgstk_cnt = 0
+        # FIXME: We desire to log the name of the class containing the __init__
+        # function being called, not "<class 'super'>".  Python does appear to
+        # be calling the expected init method despite failed attempts to obtain
+        # the name of the class in which that method is defined.  It may be
+        # necessary to search self.__mro__ for this class and then the classes
+        # beyond it for the first instance of an __init__ method.  One would
+        # expect that the super class would already be capable of such a thing,
+        # but we have yet to find that capability.
+        self._logmsgstk(
+            f"LogMutableMapping calling init method for "
+            f"{getattr(super(LogMutableMapping), '__class__')}")
+        super().__init__(*args, **kwargs)
+
+    def _logmsgstk(self, msg=None, errlvl=_pbs_v1.LOG_ERROR):
+        cls = self.__class__
+        # NOTE: this is not thread-safe
+        msg_cnt = cls._logmsgstk_cnt
+        cls._logmsgstk_cnt += 1
+        if msg:
+            _pbs_v1.logmsg(
+                errlvl,
+                f"{cls.__name__}:{hex(id(self))}:{msg_cnt}:{msg}")
+        stack = inspect.stack()
+        stack.pop(0)
+        frame_num = 0
+        while stack[::-1]:
+            frame, file_name, line_num, func_name, lines, index = stack.pop(0)
+            _pbs_v1.logmsg(
+                errlvl,
+                f"{cls.__name__}:{hex(id(self))}:{msg_cnt}[{frame_num}]:"
+                f"{file_name}:{line_num}:{func_name}:{lines}).")
+            del frame
+            frame_num += 1
+
+    def __class_getitem__(self, key):
+        try:
+            value = super().__class_getitem__(key)
+        except Exception as e:
+            self._logmsgstk(f'key="{key}",EXCEPTION: {str(e)}"')
+            raise
+        else:
+            self._logmsgstk(f'key="{key}",value="{value}"')
+            return value
+
+    def __contains__(self, key):
+        contains = super().__contains__(key)
+        self._logmsgstk(f'key="{key}",contains="{contains}"')
+        return contains
+
+    def __delattr__(self, key):
+        try:
+            super().__delattr__(key)
+        except Exception as e:
+            self._logmsgstk(f'key="{key}",EXCEPTION: {str(e)}"')
+            raise
+        else:
+            self._logmsgstk(f'key="{key}"')
+
+    def __delitem__(self, key):
+        try:
+            super().__delitem__(key)
+        except Exception as e:
+            self._logmsgstk(f'key="{key}",EXCEPTION: {str(e)}"')
+            raise
+        else:
+            self._logmsgstk(f'key="{key}"')
+
+    def __getattr__(self, key):
+        try:
+            value = super().__getattr__(key)
+        except Exception as e:
+            self._logmsgstk(f'key="{key}",EXCEPTION: {str(e)}"')
+            raise
+        else:
+            self._logmsgstk(f'key="{key}",value="{value}"')
+            return value
+
+    def __getttribute__(self, key):
+        try:
+            value = super().__getattribute__(key)
+        except Exception as e:
+            self._logmsgstk(f'key="{key}",EXCEPTION: {str(e)}"')
+            raise
+        else:
+            self._logmsgstk(f'key="{key}",value="{value}"')
+            return value
+
+    def __getitem__(self, key):
+        try:
+            value = super().__getitem__(key)
+        except Exception as e:
+            self._logmsgstk(f'key="{key}",EXCEPTION: {str(e)}"')
+            raise
+        else:
+            self._logmsgstk(f'key="{key}",value="{value}"')
+            return value
+
+    def __ior__(self, other):
+        self._logmsgstk()
+        super().__ior__(dict, other)
+
+    def __iter__(self):
+        self._logmsgstk()
+        for key in super().__iter__():
+            self._logmsgstk(f'key="{key}"')
+            yield key
+
+    def __len__(self):
+        dlen = super().__len__()
+        self._logmsgstk(f"len={dlen}")
+        return dlen
+
+    def __or__(self, other):
+        self._logmsgstk()
+        super().__or__(dict, other)
+
+    def __repr__(self):
+        drepr = super().__repr__()
+        self._logmsgstk(f"repr={drepr}")
+        return drepr
+
+    def __ror__(self, other):
+        self._logmsgstk()
+        super().__ror__(dict, other)
+
+    def __str__(self):
+        try:
+            dstr = super().__str__()
+        except Exception as e:
+            self._logmsgstk(f'EXCEPTION: {str(e)}"')
+            raise
+        else:
+            self._logmsgstk(f"str={dstr}")
+            return dstr
+
+    def __setattr__(self, key, value):
+        self._logmsgstk(f'key="{key}",value="{value}"')
+        super().__setattr__(key, value)
+
+    def __setitem__(self, key, value):
+        self._logmsgstk(f'key="{key}",value="{value}"')
+        super().__setitem__(key, value)
+
+    def copy(self):
+        self._logmsgstk()
+        return super().copy()
+
+    def get(self, key, default=None):
+        value = super().get(key, default)
+        self._logmsgstk(f'key="{key}",value="{value}"')
+        return value
+
+    def items(self):
+        self._logmsgstk()
+        for key, value in super().keys():
+            self._logmsgstk(f'key="{key}",value="{value}"')
+            yield key, value
+
+    def keys(self):
+        self._logmsgstk()
+        for key in super().keys():
+            self._logmsgstk(f'key="{key}"')
+            yield key
+
+    def pop(self, key, *args):
+        try:
+            value = super().pop(key)
+        except Exception as e:
+            self._logmsgstk(f'key="{key}",EXCEPTION: {str(e)}"')
+            raise
+        else:
+            self._logmsgstk(f'key="{key}",value="{value}"')
+            return value
+
+    def popitem(self):
+        try:
+            key, value = super().popitem()
+        except Exception as e:
+            self._logmsgstk(f'EXCEPTION: {str(e)}"')
+            raise
+        else:
+            self._logmsgstk(f'key="{key}",value="{value}"')
+            return key, value
+
+    def setdefault(self, key, default=None):
+        self._logmsgstk(f'key="{key}",default="{default}"')
+        return super().setdefault(key, default)
+
+    def update(self, dict=None, **kwargs):
+        self._logmsgstk()
+        super().update(dict, **kwargs)
+
+    def values(self):
+        self._logmsgstk()
+        for value in super().values():
+            self._logmsgstk(f'value="{value}"')
+            yield value
+
+
+class WKD(LogMutableMapping, weakref.WeakKeyDictionary):
+    def __init__(self, *args, **kwargs):
+        def remove(k, selfref=weakref.ref(self)):
+            self._logmsgstk()
+            # Uncomment below to cause segmenation fault in when the weakref
+            # is about to be removed from the dictionary
+            # os.abort()
+
+        super().__init__(*args, **kwargs)
+        self._remove = remove
+        # self._logmsgstk()
+
+    def __copy__(self):
+        self._logmsgstk()
+        return super().__copy__()
+
+    def __deepcopy__(self, memo):
+        self._logmsgstk()
+        return super().__deepcopy__(memo)
+
+    def _commit_removals(self):
+        self._logmsgstk()
+        super()._commit_removals()
+
+    def _scrub_removals(self):
+        self._logmsgstk()
+        super()._scrub_removals()
+
+    def keyrefs(self):
+        self._logmsgstk()
+        return super().keyrefs()
+
+
+class SKD(LogMutableMapping, dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # self._logmsgstk()
+
+    # def __get__(self, key, owner):
+    #     try:
+    #         value = super().__get__(key, owner)
+    #     except Exception as e:
+    #         self._logmsgstk(f'key="{key}",EXCEPTION: {str(e)}"')
+    #         raise
+    #     else:
+    #         self._logmsgstk(f'key="{key}",value="{value}"')
+    #         return value
+
+    # @classmethod
+    # def fromkeys(self, keys, value=None):
+    #     self._logmsgstk()
+    #     return super().fromkeys(keys, value)

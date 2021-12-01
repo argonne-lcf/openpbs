@@ -47,7 +47,7 @@ This module captures all the python types representing the PBS Server objects
 (server,queue,job,resv, etc.)
 """
 from ._base_types import (PbsAttributeDescriptor, PbsReadOnlyDescriptor,
-                          pbs_resource, pbs_bool, _LOG,
+                          pbs_resource, pbs_bool, _LOG, WKD, SKD
                           )
 import _pbs_v1
 from _pbs_v1 import (_event_accept, _event_reject,

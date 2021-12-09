@@ -148,27 +148,23 @@ do_log_eventf(int eventtype, int objclass, int sev, const char *objname, const c
 	va_list args_copy;
 	int len;
 	char logbuf[LOG_BUF_SIZE];
-	char *buf;
-
-	if (will_log_event(eventtype) == 0)
-		return;
+	char *buf = logbuf;
 
 	va_copy(args_copy, args);
-
 	len = vsnprintf(logbuf, sizeof(logbuf), fmt, args_copy);
 	va_end(args_copy);
 
 	if (len >= sizeof(logbuf)) {
 		buf = pbs_asprintf_format(len, fmt, args);
-		if (buf == NULL)
-			return;
-
-	} else
-		buf = logbuf;
+		if (buf == NULL) {
+			logbuf[LOG_BUF_SIZE-1] = '\0';
+			buf = logbuf;
+		}
+	}
 
 	log_record(eventtype, objclass, sev, objname, buf);
 
-	if (len >= sizeof(logbuf))
+	if (buf != logbuf)
 		free(buf);
 }
 
@@ -188,8 +184,10 @@ do_log_eventf(int eventtype, int objclass, int sev, const char *objname, const c
 void
 log_eventf(int eventtype, int objclass, int sev, const char *objname, const char *fmt, ...)
 {
-	va_list args;
-	va_start(args, fmt);
-	do_log_eventf(eventtype, objclass, sev, objname, fmt, args);
-	va_end(args);
+	if (will_log_event(eventtype)) {
+		va_list args;
+		va_start(args, fmt);
+		do_log_eventf(eventtype, objclass, sev, objname, fmt, args);
+		va_end(args);
+	}
 }

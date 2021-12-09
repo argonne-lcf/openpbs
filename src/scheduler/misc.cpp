@@ -341,10 +341,12 @@ schdlogerr(int event, int event_class, int sev, const std::string &name, const c
 void
 log_eventf(int eventtype, int objclass, int sev, const std::string &objname, const char *fmt, ...)
 {
-	va_list args;
-	va_start(args, fmt);
-	do_log_eventf(eventtype, objclass, sev, objname.c_str(), fmt, args);
-	va_end(args);
+	if (will_log_event(eventtype)) {
+		va_list args;
+		va_start(args, fmt);
+		do_log_eventf(eventtype, objclass, sev, objname.c_str(), fmt, args);
+		va_end(args);
+	}
 }
 
 /**

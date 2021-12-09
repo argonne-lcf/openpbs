@@ -248,6 +248,12 @@ extern PyObject *pbsv1mod_meth_get_server_data_file(void);
 extern char pbsv1mod_meth_use_static_data_doc[];
 extern PyObject *pbsv1mod_meth_use_static_data(void);
 
+extern char pbsv1mod_meth__gdb_bp_doc[];
+extern PyObject *pbsv1mod_meth__gdb_bp(void);
+
+extern char pbsv1mod_meth__get_c_stack_doc[];
+extern PyObject *pbsv1mod_meth__get_c_stack(void);
+
 
 /* private */
 static PyObject *PyPbsV1ModuleExtension_Obj = NULL; /* BORROWED reference */
@@ -700,6 +706,12 @@ static PyMethodDef pbs_v1_module_methods[] = {
 	{PY_GET_PBS_CONF_METHOD,
 		(PyCFunction) pbsv1mod_meth_get_pbs_conf,
 		METH_NOARGS, pbsv1mod_meth_get_pbs_conf_doc},
+	{"_gdb_bp",
+		(PyCFunction) pbsv1mod_meth__gdb_bp,
+		METH_NOARGS, pbsv1mod_meth__gdb_bp_doc},
+	{"_get_c_stack",
+		(PyCFunction) pbsv1mod_meth__get_c_stack,
+		METH_NOARGS, pbsv1mod_meth__get_c_stack_doc},
 	{NULL, NULL}                                 /* sentinel */
 };
 

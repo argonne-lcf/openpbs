@@ -115,6 +115,7 @@ pbsv1module_PYTHON = \
 	pbs/v1/__init__.py \
 	pbs/v1/_attr_types.py \
 	pbs/v1/_base_types.py \
+	pbs/v1/_debug_utils.py \
 	pbs/v1/_exc_types.py \
 	pbs/v1/_export_types.py \
 	pbs/v1/_svr_types.py \

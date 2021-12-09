@@ -12791,6 +12791,51 @@ release_nodes_exit:
 }
 
 
+const char pbsv1mod_meth__gdb_bp_doc[] =
+"\
+_gdb_bp()\n\
+\n\
+Returns: None\n\
+";
+
+PyObject *
+pbsv1mod_meth__gdb_bp(void)
+{
+	return Py_None;
+}
+
+const char pbsv1mod_meth__get_c_stack_doc[] =
+"\
+_get_c_stack()\n\
+\n\
+Returns: a list of strings\n\
+\n\
+Note: Python and PBS must be compiled with -rdynamic flag\n\
+";
+
+#include <execinfo.h>
+#define MAX_C_STACK_SIZE 384
+
+PyObject *
+pbsv1mod_meth__get_c_stack(void)
+{
+	void *bt_data[MAX_C_STACK_SIZE];
+	int bt_size;
+	char **bt_lines;
+	int i;
+	PyObject * py_list = PyList_New(0);
+
+	bt_size = backtrace(bt_data, MAX_C_STACK_SIZE);
+	bt_lines = backtrace_symbols(bt_data, bt_size);
+	for (i = 0; i < bt_size; i++) {
+		PyObject *py_str = PyUnicode_FromString(bt_lines[i]);
+		PyList_Append(py_list, py_str);
+		Py_CLEAR(py_str);
+	}
+	free(bt_lines);
+	return py_list;
+}
+
 /**
  *
  * @brief

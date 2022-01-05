@@ -1577,7 +1577,7 @@ class pbs_resource():
         """
         if not self._has_value:
             # return the cached value
-            return _pbs_v1.resource_str_value(self)
+            return str(_pbs_v1.resource_str_value(self))
 
         rv = []
 
@@ -1592,7 +1592,7 @@ class pbs_resource():
             if resc == '_name' or resc == '_has_value':
                 continue
             v = getattr(self, resc)
-            if (v != None) or (v == ""):
+            if (v is not None) or (v == ""):
                 str_v = str(v)
                 if (str_v.find("\"") == -1) and (str_v.find(",") != -1):
                     rv.append("%s=\"%s\"" % (resc, v))
@@ -1702,7 +1702,7 @@ class pbs_resource():
             if resc == '_name' or resc == '_has_value':
                 continue
             v = getattr(self, resc)
-            if v != None:
+            if v is not None:
                 rv.append(resc)
         #
         return rv

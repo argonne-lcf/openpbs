@@ -115,16 +115,19 @@ struct map {
 
 typedef struct {
 	char func_name[64];
+	char func_caller[384];
 	double time_start;
 	double time_end;
 	double time_start_cputime;
 	double time_end_cputime;
+	int lineno_enter;
+	int lineno_exit;
 	pid_t pid;
 } perf_timing;
 
-perf_timing *alloc_perf_timing(const char *func_name);
+perf_timing *alloc_perf_timing(const char *func_name, char *func_caller);
 
-perf_timing *start_perf_timing(const char *func_name);
+perf_timing *start_perf_timing(const char *func_name, int lineno);
 
 void init_perf_timing(const char *file_name);
 

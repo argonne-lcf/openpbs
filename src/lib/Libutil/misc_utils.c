@@ -88,6 +88,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#include <execinfo.h>
 
 #include "pbs_error.h"
 #include "job.h"
@@ -1902,11 +1903,13 @@ init_perf_timing(const char *file_name) {
 }
 
 perf_timing * 
-alloc_perf_timing(const char *func_name)
+alloc_perf_timing(const char *func_name, char *func_caller)
 {
 	perf_timing *perf_t = malloc(sizeof(*perf_t));
 	strncpy(perf_t->func_name, func_name, 64-1);
 	perf_t->func_name[64-1] = '\0';
+	strncpy(perf_t->func_caller, func_caller, 384-1);
+	perf_t->func_caller[384-1] = '\0';
 	perf_t->time_start = 0;
 	perf_t->time_end = 0;
 	perf_t->time_start_cputime = 0;
@@ -1916,9 +1919,20 @@ alloc_perf_timing(const char *func_name)
 }
 
 perf_timing *
-start_perf_timing(const char *func_name)
+start_perf_timing(const char *func_name, int lineno)
 {
-	perf_timing *perf_t = alloc_perf_timing(func_name);
+	void *bt_data[384];
+	int bt_size;
+	char **bt_lines;
+	perf_timing *perf_t;
+	bt_size = backtrace(bt_data, 384);
+	bt_lines = backtrace_symbols(bt_data, bt_size);
+	if (bt_size >= 2) {
+		perf_t = alloc_perf_timing(func_name, bt_lines[2]);
+	} else {
+		perf_t = alloc_perf_timing(func_name, "UNKNOWN");
+	}
+	perf_t->lineno_enter = lineno;
 	perf_t->time_start = get_walltime();
 	perf_t->time_start_cputime = get_cputime();
 	return perf_t;
@@ -1932,16 +1946,17 @@ end_perf_timing(perf_timing** perf_t_ptr, int lineno, const char *file_name) {
 	}
 	perf_t->time_end = get_walltime();
 	perf_t->time_end_cputime = get_cputime();
+	perf_t->lineno_exit = lineno;
 	FILE *fd;
 	time_t now;
  	time(&now);
 	fd = fopen(perf_file, "a");
 	if (fd > 0){
 		if (ftell(fd) == 0) {
-			fprintf(fd, "file,func_name,lineno,time_start,time_start_cputime,time_end,time_end_cputime,pid\n");
+			fprintf(fd, "file,func_name,lineno_enter,lineno_exit,time_start,time_start_cputime,time_end,time_end_cputime,pid,func_caller\n");
 		}
-		fprintf(fd,"%s,%s,%d,%f,%f,%f,%f,%u\n", file_name, perf_t->func_name, lineno, perf_t->time_start,
-			perf_t->time_start_cputime, perf_t->time_end, perf_t->time_end_cputime, perf_t->pid);
+		fprintf(fd,"%s,%s,%d,%d,%f,%f,%f,%f,%u,%s\n", file_name, perf_t->func_name, perf_t->lineno_enter, perf_t->lineno_exit, perf_t->time_start,
+			perf_t->time_start_cputime, perf_t->time_end, perf_t->time_end_cputime, perf_t->pid, perf_t->func_caller);
 		fclose(fd);
 	} else {
 		/* Fixme: logging? */

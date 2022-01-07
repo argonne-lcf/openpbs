@@ -12816,3 +12816,42 @@ server_attribute_exit:
 	Py_CLEAR(py_server_attribute_args);
 	return py_server_attribute;
 }
+
+const char pbsv1mod_meth_get_resource_value_dict_doc[] =
+	"get_resource_value_dict()\n\
+\n\
+";
+
+/**
+ * @brief
+ *	This is callable in a Python script, for returning the
+ *  pbs_resource_value_list as a dictionary with the key equal
+ *  to the py_resource_str_value and the value the py_resource.
+ *
+ * @param[in]	args[1]	- the pbs_resource Python object.
+ *
+ * @return	PyObject *
+ * @retval	NULL	- with an accompanying AssertionError Python exception.
+ * @retval	<python dictionary> - a Python dictionary representing the
+ *					pbs_resource list as a dictionary.
+ *
+ */
+PyObject *
+pbsv1mod_meth_get_resource_value_dict(PyObject *self, PyObject *args, PyObject *kwds)
+{
+	pbs_resource_value *resc_val;
+	PyObject *py_resource_value_dict = PyDict_New();
+
+	resc_val = (pbs_resource_value *) GET_NEXT(pbs_resource_value_list);
+	while (resc_val != NULL) {
+		Py_INCREF(resc_val->py_resource);
+		Py_INCREF(resc_val->py_resource_str_value);
+		if (PyDict_SetItem(py_resource_value_dict,
+						   resc_val->py_resource_str_value,
+						   resc_val->py_resource) < 0) {
+			Py_RETURN_NONE;
+		}
+		resc_val = (pbs_resource_value *) GET_NEXT(resc_val->all_rescs);
+	}
+	return py_resource_value_dict;
+}

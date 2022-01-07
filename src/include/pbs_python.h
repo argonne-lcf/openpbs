@@ -381,6 +381,7 @@ extern int get_py_progname(char **);
 #define PY_STR_TO_VNODE_NTYPE_METHOD "str_to_vnode_ntype"
 #define PY_STR_TO_VNODE_SHARING_METHOD "str_to_vnode_sharing"
 #define PY_VNODE_STATE_TO_STR_METHOD "vnode_state_to_str"
+#define PY_GET_RESOURCE_VALUE_DICT "get_resource_value_dict"
 #define PY_VNODE_SHARING_TO_STR_METHOD "vnode_sharing_to_str"
 #define PY_VNODE_NTYPE_TO_STR_METHOD "vnode_ntype_to_str"
 #define PY_GET_PYTHON_DAEMON_NAME_METHOD "get_python_daemon_name"

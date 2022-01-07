@@ -246,6 +246,11 @@ extern PyObject *pbsv1mod_meth_get_server_data_file(void);
 extern char pbsv1mod_meth_use_static_data_doc[];
 extern PyObject *pbsv1mod_meth_use_static_data(void);
 
+extern char pbsv1mod_meth_get_resource_value_dict_doc[];
+extern PyObject *pbsv1mod_meth_get_resource_value_dict(PyObject *self,
+						  PyObject *args, PyObject *kwds);
+
+
 /* private */
 static PyObject *PyPbsV1ModuleExtension_Obj = NULL; /* BORROWED reference */
 
@@ -631,6 +636,9 @@ static PyMethodDef pbs_v1_module_methods[] = {
 	{PY_RESOURCE_STR_VALUE_METHOD,
 	 (PyCFunction) pbsv1mod_meth_resource_str_value,
 	 METH_VARARGS | METH_KEYWORDS, pbsv1mod_meth_resource_str_value_doc},
+	{PY_GET_RESOURCE_VALUE_DICT,
+	 (PyCFunction) pbsv1mod_meth_get_resource_value_dict,
+	 METH_VARARGS | METH_KEYWORDS, pbsv1mod_meth_get_resource_value_dict_doc},
 	{PY_VNODE_STATE_TO_STR_METHOD,
 	 (PyCFunction) pbsv1mod_meth_vnode_state_to_str,
 	 METH_VARARGS | METH_KEYWORDS, pbsv1mod_meth_vnode_state_to_str_doc},

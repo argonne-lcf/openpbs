@@ -538,7 +538,7 @@
    fun:main
 }
 {
-   From PBS (server) - Suppress intentional unfreed memory from pbs_python_populae_attributes_to_python_class() that is tracked globally in pbs_resource_value_list.
+   From PBS (server) - Suppress intentional unfreed memory from pbs_python_populae_attributes_to_python_class() that is tracked globally in pbs_resource_value_cache.
    Memcheck:Leak
    fun:malloc
    fun:pbs_python_populate_attributes_to_python_class

@@ -77,6 +77,7 @@
 #include "pbs_ecl.h"
 #include "placementsets.h"
 #include "pbs_reliable.h"
+#include "uthash.h"
 
 /* -----                        GLOBALS                        -----    */
 
@@ -222,18 +223,18 @@ static pbs_list_head pbs_vnode_set_list; /* list of vnode set requests */
  * @param[in]	attr_def_p - the resource definition for the resource list
  * 			     represented by 'py_resource'.
  * @param[in]	value_list - list of values cached for the 'py_resource' object
- * @param[in]	all_resc - links various pbs_resource_value structures.
+ * @param[in]	hh - hash table handle
  */
 typedef struct _pbs_resource_value {
 	PyObject *py_resource;
 	PyObject *py_resource_str_value;
 	attribute_def *attr_def_p; /* corresponding resource definition */
 	pbs_list_head value_list;  /* resource values to set */
-	pbs_list_link all_rescs;
+	UT_hash_handle hh;
 } pbs_resource_value;
 
-static pbs_list_head pbs_resource_value_cache; /* list of resource */
-					      /* values to instantiate */
+/* hash table of resource values to instantiate */
+static pbs_resource_value *pbs_resource_value_cache = NULL;
 
 static PyObject *PyPbsV1Module_Obj = NULL; /* pbs.v1 module object */
 
@@ -387,82 +388,24 @@ init_pbs_vnode_set_list()
 
 /**
  * @brief
- *      Initialize the list of PBS resource values to set for new runs of hooks
- *	servicing a given event (e.g. runjob event).
+ *  Clear the table of cached PBS resource values to prepare for new runs of
+ *  hooks servicing a given event (e.g. runjob event).
  *
  * @return void
  */
 void
-init_pbs_resource_value_cache()
+clear_pbs_resource_value_cache()
 {
 	pbs_resource_value *resc_val;
 	pbs_resource_value *nxp_resc_val;
-	resc_val = (pbs_resource_value *) GET_NEXT(pbs_resource_value_cache);
-	while (resc_val != NULL) {
-		/* save the next vnode_set_req item  */
-		nxp_resc_val = (pbs_resource_value *) GET_NEXT(resc_val->all_rescs);
-
+	HASH_ITER(hh, pbs_resource_value_cache, resc_val, nxp_resc_val)
+	{
+		HASH_DEL(pbs_resource_value_cache, resc_val);
 		Py_CLEAR(resc_val->py_resource);
 		Py_CLEAR(resc_val->py_resource_str_value);
 		free_attrlist(&resc_val->value_list);
-
-		delete_link(&resc_val->all_rescs);
 		free(resc_val);
-		resc_val = nxp_resc_val;
 	}
-}
-
-/**
- * @brief
- *	get the resc_val from the 'pbs_resource_value_cache' and return.
- *
- * @param[in]	py_resource_match - the Python Resource match.
- *
- * @return pbs_resource_value
- * @retval pbs_resource_value	- for success.
- * @retval NULL 				- if not found.
- *
- */
-pbs_resource_value *
-get_resc_val_from_pbs_resource_value_cache(PyObject *py_resource_match)
-{
-	pbs_resource_value *resc_val = NULL;
-	resc_val = (pbs_resource_value *) GET_NEXT(pbs_resource_value_cache);
-	while (resc_val != NULL) {
-
-		if ((resc_val->py_resource != NULL) &&
-		    (py_resource_match == resc_val->py_resource)) {
-			break;
-		}
-
-		resc_val = (pbs_resource_value *) GET_NEXT(resc_val->all_rescs);
-	}
-	return resc_val;
-}
-
-void
-clear_head_pbs_resource_value_cache()
-{
-	CLEAR_HEAD(pbs_resource_value_cache);
-}
-
-/**
- * @brief
- *	append a resc_val to 'pbs_resource_value_cache'.
- *
- * @param[in]	pbs_resource_value - resource value.
- *
- * @return pbs_resource_value
- * @retval pbs_resource_value	- for success.
- * @retval NULL 				- if not found.
- *
- */
-void
-append_resc_val_to_pbs_resource_value_cache(pbs_resource_value *resc_val)
-{
-	append_link(&pbs_resource_value_cache,
-			&resc_val->all_rescs,
-			(pbs_resource_value *) resc_val);
 }
 
 /**
@@ -1971,8 +1914,9 @@ set_entity_resource_or_return_value(pbs_list_head *resc_value_list,
  *
  */
 static int
-set_nonentity_resource_or_return_value(pbs_list_head *resc_value_list, char *reslist_name,
-			     PyObject *py_resource, char **p_strbuf)
+set_nonentity_resource_or_return_value(
+	pbs_list_head *resc_value_list, char *reslist_name, PyObject *py_resource,
+	char **p_strbuf)
 {
 	static char *ret_str_value = NULL;
 	static size_t ret_len = STRBUF;
@@ -2060,9 +2004,8 @@ set_nonentity_resource_or_return_value(pbs_list_head *resc_value_list, char *res
  *
  */
 int
-set_resource_or_return_value(pbs_resource_value *resc_val,
-							PyObject *py_resource,
-							char **ret_string)
+set_resource_or_return_value(
+	pbs_resource_value *resc_val, PyObject *py_resource, char **ret_string)
 {
 	int rc;
 	if (TYPE_ENTITY(resc_val->attr_def_p->at_type)) {
@@ -2070,13 +2013,12 @@ set_resource_or_return_value(pbs_resource_value *resc_val,
 			&(resc_val->value_list), resc_val->attr_def_p->at_name,
 			py_resource, ret_string);
 	} else { /* a regular resource */
-		rc = set_nonentity_resource_or_return_value(&(resc_val->value_list),
-					      resc_val->attr_def_p->at_name,
-					      py_resource, ret_string);
+		rc = set_nonentity_resource_or_return_value(
+			&(resc_val->value_list), resc_val->attr_def_p->at_name,
+			py_resource, ret_string);
 	}
 	return (rc);
 }
-
 
 /**
  * @brief
@@ -2225,7 +2167,6 @@ pbs_python_populate_attributes_to_python_class(PyObject *py_instance,
 
 					(void) memset((char *) resc_val, (int) 0,
 						      (size_t) sizeof(pbs_resource_value));
-					CLEAR_LINK(resc_val->all_rescs);
 					/* no need to incref py_attr_resc */
 					/* since that's already done */
 					/* with the PyObject_GetAttrString() */
@@ -2239,7 +2180,7 @@ pbs_python_populate_attributes_to_python_class(PyObject *py_instance,
 
 					resc_val->py_resource_str_value =
 						py_resource_string_value(resc_val);
-					append_resc_val_to_pbs_resource_value_cache(resc_val);
+					HASH_ADD_PTR(pbs_resource_value_cache, py_resource, resc_val);
 				}
 			} else { /* attribute */
 				/* PBS' ATTR_inter/ATTR_block/ATTR_X11_port can either have a boolean-like */
@@ -2649,7 +2590,7 @@ load_cached_resource_value(PyObject *py_resource_match)
 	pbs_resource_value *resc_val = NULL;
 	int rc;
 
-	resc_val = get_resc_val_from_pbs_resource_value_cache(py_resource_match);
+	HASH_FIND_PTR(pbs_resource_value_cache, py_resource_match, resc_val);
 
 	if (resc_val == NULL) {
 		/* no match */
@@ -2671,8 +2612,9 @@ load_cached_resource_value(PyObject *py_resource_match)
 				       PY_RESOURCE_HAS_VALUE);
 		}
 		Py_DECREF(resc_val->py_resource);
+		/* FIXME: Py_DECREF(resc_val->py_resource_str_value); -- mem leak??? */
 		free_attrlist(&resc_val->value_list);
-		delete_link(&resc_val->all_rescs);
+		HASH_DEL(pbs_resource_value_cache, resc_val);
 		free(resc_val);
 	}
 
@@ -5229,9 +5171,6 @@ _pbs_python_event_set(unsigned int hook_event, char *req_user, char *req_host,
 	static int init_iters = 0;	      /* 1 to initialize the PBS iterarators list */
 	static int init_vnode_set = 0;	      /* 1 to initialize the vnode set opers */
 
-	static int init_resource_values = 0; /* 1 to initialize the */
-					     /* list of pbs_resource values */
-					     /* to instantiate. */
 	static long max_hooks = 0;
 	static long max_objects = 0;
 	static time_t previous_restart = (time_t) 0;
@@ -5255,14 +5194,9 @@ _pbs_python_event_set(unsigned int hook_event, char *req_user, char *req_host,
 		init_vnode_set = 1;
 	}
 
-	if (!init_resource_values) {
-		clear_head_pbs_resource_value_cache();
-		init_resource_values = 1;
-	}
-
 	init_pbs_pbs_iter_list();
 	init_pbs_vnode_set_list();
-	init_pbs_resource_value_cache();
+	clear_pbs_resource_value_cache();
 
 	/* py_hook_pbsevent is instantiated in C_MODE so I own it */
 	Py_CLEAR(py_hook_pbsevent);
@@ -12337,8 +12271,8 @@ pbsv1mod_meth_resource_str_value(PyObject *self, PyObject *args, PyObject *kwds)
 					 &py_resource_match)) {
 		return NULL;
 	}
-	
-	resc_val = get_resc_val_from_pbs_resource_value_cache(py_resource_match);
+
+	HASH_FIND_PTR(pbs_resource_value_cache, py_resource_match, resc_val);
 
 	if (resc_val == NULL) {
 		/* no match */

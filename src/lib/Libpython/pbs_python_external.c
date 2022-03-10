@@ -75,6 +75,8 @@ _pbs_python_compile_file(const char *file_name,
 			 const char *compiled_code_file_name);
 extern int pbs_python_setup_namespace_dict(PyObject *globals);
 
+static PyObject *py_builtins = NULL;
+
 #endif /* PYTHON */
 
 #include <pbs_python.h>
@@ -206,6 +208,11 @@ pbs_python_ext_start_interpreter(struct python_interpreter_data *interp_data)
 			"--> Failed to initialize Python interpreter <--");
 		goto ERROR_EXIT;
 	}
+
+	/* Get a reference to the builtins for the new interpreter and cache it */
+	py_builtins = PyEval_GetBuiltins();
+	Py_INCREF(py_builtins);
+
 	/*
 	 * Add Altair python module directory to sys path. NOTE:
 	 *  PBS_PYTHON_MODULE_DIR is a command line define, also insert
@@ -318,6 +325,8 @@ pbs_python_ext_shutdown_interpreter(struct python_interpreter_data *interp_data)
 			/* before finalize clear global python objects */
 			pbs_python_event_unset(); /* clear Python event object */
 			pbs_python_unload_python_types(interp_data);
+			/* Release the reference to the builtins for the current interpreter */
+			Py_CLEAR(py_builtins);
 			Py_Finalize();
 		}
 		interp_data->destroy_interpreter_data(interp_data);
@@ -378,6 +387,11 @@ pbs_python_ext_quick_start_interpreter(void)
 			"--> Failed to quick initialize Python interpreter <--");
 		goto ERROR_EXIT;
 	}
+
+	/* Get a reference to the builtins for the new interpreter and cache it */
+	py_builtins = PyEval_GetBuiltins();
+	Py_INCREF(py_builtins);
+
 	/*
 	 * Add Altair python module directory to sys path. NOTE:
 	 *  PBS_PYTHON_MODULE_DIR is a command line define, also insert
@@ -438,6 +452,8 @@ pbs_python_ext_quick_shutdown_interpreter(void)
 		  PBS_EVENTCLASS_SERVER,
 		  LOG_INFO, "pbs_python_ext_quick_shutdown_interpreter",
 		  "--> Stopping Python interpreter <--");
+	/* Release the reference to the builtins for the current interpreter */
+	Py_CLEAR(py_builtins);
 	Py_Finalize();
 #endif /* PYTHON */
 }
@@ -547,8 +563,7 @@ pbs_python_ext_namespace_init(
 	 * setup our namespace, by including all the modules that are needed to
 	 * run the python scripts
 	 */
-	if ((PyDict_SetItemString(namespace_dict, "__builtins__",
-				  PyEval_GetBuiltins()) == -1)) {
+	if ((PyDict_SetItemString(namespace_dict, "__builtins__", py_builtins) == -1)) {
 		pbs_python_write_error_to_log(__func__);
 		goto ERROR_EXIT;
 	}

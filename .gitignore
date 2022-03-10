@@ -295,3 +295,5 @@ src/lib/Libpbs/pbs.pc
 
 # Generated directories by autotools
 *.libs
+
+/tmp

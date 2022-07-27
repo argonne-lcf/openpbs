@@ -43,18 +43,18 @@
 #include <errno.h>
 #include <unistd.h>
 #include <pwd.h>
-#include <pthread.h>
-#include <dlfcn.h>
 #include <grp.h>
+#include <munge.h>
+#include "pbs_config.h"
 #include "libauth.h"
 #include "pbs_ifl.h"
 
-static pthread_once_t munge_init_once = PTHREAD_ONCE_INIT;
+#if defined(MUNGE_PBS_SOCKET_PATH)
+static char * munge_socket_path = MUNGE_PBS_SOCKET_PATH;
+#else
+static char * munge_socket_path = NULL;
+#endif
 
-static void *munge_dlhandle = NULL;							       /* MUNGE dynamic loader handle */
-static int (*munge_encode)(char **, void *, const void *, int) = NULL;			       /* MUNGE munge_encode() function pointer */
-static int (*munge_decode)(const char *cred, void *, void **, int *, uid_t *, gid_t *) = NULL; /* MUNGE munge_decode() function pointer */
-static char *(*munge_strerror)(int) = NULL;						       /* MUNGE munge_stderror() function pointer */
 static void (*logger)(int type, int objclass, int severity, const char *objname, const char *text);
 
 #define __MUNGE_LOGGER(e, c, s, m)                                        \
@@ -69,71 +69,8 @@ static void (*logger)(int type, int objclass, int severity, const char *objname,
 #define MUNGE_LOG_ERR(m) __MUNGE_LOGGER(PBSEVENT_ERROR | PBSEVENT_FORCE, PBS_EVENTCLASS_SERVER, LOG_ERR, m)
 #define MUNGE_LOG_DBG(m) __MUNGE_LOGGER(PBSEVENT_DEBUG | PBSEVENT_FORCE, PBS_EVENTCLASS_SERVER, LOG_DEBUG, m)
 
-static void init_munge(void);
 static char *munge_get_auth_data(char *, size_t);
 static int munge_validate_auth_data(void *, char *, size_t);
-
-/**
- * @brief
- *	init_munge Check if libmunge.so shared library is present in the system
- *	and assign specific function pointers to be used at the time
- *	of decode or encode.
- *
- * @note
- *	This function should get invoked only once. Using pthread_once for this purpose.
- *	This function is not expecting any arguments. So storing error messages in a static
- *	variable in case of error.
- *
- * @return void
- *
- */
-static void
-init_munge(void)
-{
-	static const char libmunge[] = "libmunge.so";
-	char ebuf[LOG_BUF_SIZE];
-
-	ebuf[0] = '\0';
-	munge_dlhandle = dlopen(libmunge, RTLD_LAZY);
-	if (munge_dlhandle == NULL) {
-		snprintf(ebuf, sizeof(ebuf), "%s not found", libmunge);
-		MUNGE_LOG_ERR(ebuf);
-		goto err;
-	}
-
-	munge_encode = dlsym(munge_dlhandle, "munge_encode");
-	if (munge_encode == NULL) {
-		snprintf(ebuf, sizeof(ebuf), "symbol munge_encode not found in %s", libmunge);
-		MUNGE_LOG_ERR(ebuf);
-		goto err;
-	}
-
-	munge_decode = dlsym(munge_dlhandle, "munge_decode");
-	if (munge_decode == NULL) {
-		snprintf(ebuf, sizeof(ebuf), "symbol munge_decode not found in %s", libmunge);
-		MUNGE_LOG_ERR(ebuf);
-		goto err;
-	}
-
-	munge_strerror = dlsym(munge_dlhandle, "munge_strerror");
-	if (munge_strerror == NULL) {
-		snprintf(ebuf, sizeof(ebuf), "symbol munge_strerror not found in %s", libmunge);
-		MUNGE_LOG_ERR(ebuf);
-		goto err;
-	}
-
-	return;
-
-err:
-	if (munge_dlhandle)
-		dlclose(munge_dlhandle);
-
-	munge_dlhandle = NULL;
-	munge_encode = NULL;
-	munge_decode = NULL;
-	munge_strerror = NULL;
-	return;
-}
 
 /**
  * @brief
@@ -155,6 +92,7 @@ munge_get_auth_data(char *ebuf, size_t ebufsz)
 	struct passwd *pwent;
 	struct group *grp;
 	char payload[PBS_MAXUSER + PBS_MAXGRPN + 1] = {'\0'};
+	munge_ctx_t munge_ctx = NULL;
 	int munge_err = 0;
 
 	/*
@@ -165,15 +103,6 @@ munge_get_auth_data(char *ebuf, size_t ebufsz)
 	 *
 	 * see pbs_auth_process_handshake_data()
 	 */
-
-	if (munge_dlhandle == NULL) {
-		pthread_once(&munge_init_once, init_munge);
-		if (munge_encode == NULL) {
-			snprintf(ebuf, ebufsz, "Failed to load munge lib");
-			MUNGE_LOG_ERR(ebuf);
-			goto err;
-		}
-	}
 
 	myrealuid = getuid();
 	pwent = getpwuid(myrealuid);
@@ -192,17 +121,33 @@ munge_get_auth_data(char *ebuf, size_t ebufsz)
 
 	snprintf(payload, PBS_MAXUSER + PBS_MAXGRPN, "%s:%s", pwent->pw_name, grp->gr_name);
 
-	munge_err = munge_encode(&cred, NULL, payload, strlen(payload));
+	if (munge_socket_path) {
+		munge_ctx = munge_ctx_create();
+		if (munge_ctx == NULL) {
+			snprintf(ebuf, ebufsz, "Failed to create a MUNGE context");
+			MUNGE_LOG_ERR(ebuf);
+			goto err;
+		}
+		munge_ctx_set(munge_ctx, MUNGE_OPT_SOCKET, munge_socket_path);
+	}
+
+	munge_err = munge_encode(&cred, munge_ctx, payload, strlen(payload));
 	if (munge_err != 0) {
 		snprintf(ebuf, ebufsz, "MUNGE user-authentication on encode failed with `%s`", munge_strerror(munge_err));
 		MUNGE_LOG_ERR(ebuf);
 		goto err;
 	}
+
+fn_return:
+	if (munge_ctx) {
+		munge_ctx_destroy(munge_ctx);
+	}
 	return cred;
 
 err:
 	free(cred);
-	return NULL;
+	cred = NULL;
+	goto fn_return;
 }
 
 /**
@@ -227,6 +172,7 @@ munge_validate_auth_data(void *auth_data, char *ebuf, size_t ebufsz)
 	struct passwd *pwent = NULL;
 	struct group *grp = NULL;
 	void *recv_payload = NULL;
+	munge_ctx_t munge_ctx = NULL;
 	int munge_err = 0;
 	char *p;
 	int rc = -1;
@@ -240,16 +186,17 @@ munge_validate_auth_data(void *auth_data, char *ebuf, size_t ebufsz)
 	 * see pbs_auth_process_handshake_data()
 	 */
 
-	if (munge_dlhandle == NULL) {
-		pthread_once(&munge_init_once, init_munge);
-		if (munge_decode == NULL) {
-			snprintf(ebuf, ebufsz, "Failed to load munge lib");
+	if (munge_socket_path) {
+		munge_ctx = munge_ctx_create();
+		if (munge_ctx == NULL) {
+			snprintf(ebuf, ebufsz, "Failed to create a MUNGE context");
 			MUNGE_LOG_ERR(ebuf);
 			goto err;
 		}
+		munge_ctx_set(munge_ctx, MUNGE_OPT_SOCKET, munge_socket_path);
 	}
 
-	munge_err = munge_decode(auth_data, NULL, &recv_payload, &recv_len, &uid, &gid);
+	munge_err = munge_decode(auth_data, munge_ctx, &recv_payload, &recv_len, &uid, &gid);
 	if (munge_err != 0) {
 		snprintf(ebuf, ebufsz, "MUNGE user-authentication on decode failed with `%s`", munge_strerror(munge_err));
 		MUNGE_LOG_ERR(ebuf);
@@ -280,6 +227,9 @@ munge_validate_auth_data(void *auth_data, char *ebuf, size_t ebufsz)
 err:
 	if (recv_payload)
 		free(recv_payload);
+	if (munge_ctx) {
+		munge_ctx_destroy(munge_ctx);
+	}
 	return rc;
 }
 
@@ -384,15 +334,6 @@ pbs_auth_process_handshake_data(void *ctx, void *data_in, size_t len_in, void **
 	*len_out = 0;
 	*data_out = NULL;
 	*is_handshake_done = 0;
-
-	pthread_once(&munge_init_once, init_munge);
-
-	if (munge_dlhandle == NULL) {
-		*data_out = strdup("Munge lib is not loaded");
-		if (*data_out != NULL)
-			*len_out = strlen(*data_out);
-		return 1;
-	}
 
 	if (len_in > 0) {
 		char *data = (char *) data_in;

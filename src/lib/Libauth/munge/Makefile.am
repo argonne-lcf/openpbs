@@ -39,12 +39,16 @@
 
 #
 
-lib_LTLIBRARIES = libauth_munge.la
+if HAVE_MUNGE
+lib_LTLIBRARIES = libauth_@MUNGE_PBS_LIBAUTH_NAME@.la
 
-libauth_munge_la_CPPFLAGS = \
+libauth_@MUNGE_PBS_LIBAUTH_NAME@_la_CPPFLAGS = \
 	-I$(top_srcdir)/src/include
 
-libauth_munge_la_LDFLAGS = -version-info 0:0:0
+libauth_@MUNGE_PBS_LIBAUTH_NAME@_la_LDFLAGS = -version-info 0:0:0
 
-libauth_munge_la_SOURCES = \
+libauth_@MUNGE_PBS_LIBAUTH_NAME@_la_LIBADD = -lmunge
+
+libauth_@MUNGE_PBS_LIBAUTH_NAME@_la_SOURCES = \
 	munge_supp.c
+endif

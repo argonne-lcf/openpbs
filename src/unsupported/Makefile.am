@@ -66,7 +66,8 @@ dist_unsupported_DATA = \
 	run_pelog_shell.ini \
 	cray_readme \
 	ReliableJobStartup.py \
-	pbs_output.py
+	pbs_output.py \
+	pbs-munge-auth.spec
 
 pbs_rmget_CPPFLAGS = \
 	-I$(top_srcdir)/src/include \
@@ -84,3 +85,22 @@ pbs_rmget_LDADD = \
 	@KRB5_LIBS@
 
 pbs_rmget_SOURCES = pbs_rmget.c
+
+.PHONY: pbs-munge-auth-rpm
+pbs-munge-auth-rpm:
+	set -x ; \
+	rpm_top_dir=`rpm --eval '%{_topdir}'` && \
+	rpm_spec_dir=`rpm --eval '%{_specdir}'` && \
+	rpm_source_dir=`rpm --eval '%{_sourcedir}'` && \
+	mkdir -p $$rpm_top_dir/{BUILD,RPMS,SOURCES,SPECS,SRPMS} && \
+	(cd $(top_builddir) && make dist) && \
+	pbs_path=`ls $(top_builddir)/$(PACKAGE)-$(VERSION).tar.* | head -n 1` && \
+	cp -p $$pbs_path $$rpm_source_dir/ && \
+	cp -p $(srcdir)/pbs-munge-auth.spec $$rpm_spec_dir/ && \
+	rpmbuild -v --clean -bb \
+		-D "pbs_prefix ${prefix}" \
+		-D "pbs_libdir ${libdir}" \
+		-D "pbs_pkg $(PACKAGE)" \
+		-D "pbs_dist `echo $$pbs_path | sed -e s',.*/,,'`" \
+		-D "pbs_version $(VERSION)" \
+		$$rpm_spec_dir/pbs-munge-auth.spec

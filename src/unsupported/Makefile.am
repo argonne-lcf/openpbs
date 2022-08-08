@@ -93,14 +93,22 @@ pbs-munge-auth-rpm:
 	rpm_spec_dir=`rpm --eval '%{_specdir}'` && \
 	rpm_source_dir=`rpm --eval '%{_sourcedir}'` && \
 	mkdir -p $$rpm_top_dir/{BUILD,RPMS,SOURCES,SPECS,SRPMS} && \
-	(cd $(top_builddir) && make dist) && \
-	pbs_path=`ls $(top_builddir)/$(PACKAGE)-$(VERSION).tar.* | head -n 1` && \
+	if [ -d $(top_srcdir)/.git ] ; then \
+		version=`cd ${top_srcdir} 2>&1 >/dev/null && \
+			git describe --tags --dirty=".modified" --match '[vV][0-9]*' | \
+				sed -e 's/^[vV]//' -e 's/-/./g'` ; \
+	else \
+		version=$(VERSION) ; \
+	fi && \
+	(cd $(top_builddir) && make VERSION=$$version PACKAGE_VERSION=$$version \
+		PBS_VERSION=$$version dist) && \
+	pbs_path=`ls $(top_builddir)/$(PACKAGE)-$$version.tar.* | head -n 1` && \
 	cp -p $$pbs_path $$rpm_source_dir/ && \
 	cp -p $(srcdir)/pbs-munge-auth.spec $$rpm_spec_dir/ && \
 	rpmbuild -v --clean -bb \
-		-D "pbs_prefix ${prefix}" \
-		-D "pbs_libdir ${libdir}" \
+		-D "pbs_prefix $(prefix)" \
+		-D "pbs_libdir $(libdir)" \
 		-D "pbs_pkg $(PACKAGE)" \
 		-D "pbs_dist `echo $$pbs_path | sed -e s',.*/,,'`" \
-		-D "pbs_version $(VERSION)" \
+		-D "pbs_version $$version" \
 		$$rpm_spec_dir/pbs-munge-auth.spec

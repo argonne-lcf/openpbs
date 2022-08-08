@@ -62,9 +62,13 @@
 %{error:pbs_version not defined}
 %endif
 
+%if %{defined suse_version}
+%define dist .suse%(echo %{suse_version} | sed -e 's/..$//')
+%endif
+
 Name: pbs-munge-auth-lib
 Version: %{pbs_version}
-Release: 5
+Release: 6%{?dist}
 License: AGPLv3 with exceptions
 Summary: User authentication library for PBS using MUNGE
 Source: %{pbs_dist}

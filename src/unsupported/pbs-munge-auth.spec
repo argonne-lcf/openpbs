@@ -68,7 +68,7 @@
 
 Name: pbs-munge-auth-lib
 Version: %{pbs_version}
-Release: 6%{?dist}
+Release: 10%{?dist}
 License: AGPLv3 with exceptions
 Summary: User authentication library for PBS using MUNGE
 Source: %{pbs_dist}
@@ -128,6 +128,8 @@ if [ "%{munge_pbs_service_name}" != "munge" ] ; then
         -e 's,\(PIDFile=\).*,\1'"%{munge_pbs_pid_path}"',' \
         -e '/EnvironmentFile=/ d' \
     %{_unitdir}/munge.service >%{munge_pbs_service_name}.service
+    [ -z "%{munge_pbs_pid_path}" ] && \
+        %{__sed} -i -e '/PIDFile=/ d' %{munge_pbs_service_name}.service
     cd -
 fi
 
@@ -137,15 +139,17 @@ cd src/lib/Libauth/munge
 cd -
 if [ "%{munge_pbs_service_name}" != "munge" ] ; then
     cd src/unsupported
-    %{__install} -D -m 444 -t %{?buildroot}/%{_unitdir} \
+    mkdir -p -m 755 %{?buildroot}/%{_unitdir}
+    %{__install} -m 444 -t %{?buildroot}/%{_unitdir} \
         %{munge_pbs_service_name}.service
     cd -
 fi
 
 %files
-%defattr(444, root, root, 755)
+%defattr(555, root, root, 755)
 %{pbs_libdir}/libauth_%{munge_pbs_libauth_name}.so*
-%exclude %{pbs_libdir}/libauth_%{munge_pbs_libauth_name}.{la,a}
+%exclude %{pbs_libdir}/libauth_%{munge_pbs_libauth_name}.a
+%exclude %{pbs_libdir}/libauth_%{munge_pbs_libauth_name}.la
 
 %if "%{munge_pbs_service_name}" != "munge"
 %package -n %{munge_pbs_service_name}-service

@@ -46,8 +46,11 @@ AC_DEFUN([PBS_AC_WITH_PYTHON],
       [Specify the directory where Python is installed.]
     )
   )
-  AS_IF([test -n "$with_python"], [PYTHON="$with_python/bin/python3"])
+  AS_IF([test "x$with_python" != "x"],
+    [PYTHON="$with_python/bin/python3"]
+  )
   AM_PATH_PYTHON([3.6])
+  [PYTHON_CONFIG="$PYTHON-config"]
   [python_major_version=`echo $PYTHON_VERSION | sed -e 's/\..*$//'`]
   [python_minor_version=`echo $PYTHON_VERSION | sed -e 's/^[^.]*\.//'`]
   AS_IF([test $python_major_version -eq 3],
